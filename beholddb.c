@@ -258,19 +258,6 @@ static void tags_stat(const char **tags, size_t *count_p, size_t *count_m, size_
 	lists_stat(tags, counts, lens, 2);
 }
 
-static char *args_binder(int count)
-{
-	char *binder = (char*)malloc(count * 2 + 1);
-	for (int i = 0; i < count; ++i)
-	{
-		binder[2 * i + 0] = ',';
-		binder[2 * i + 1] = '?';
-	}
-	binder[0] = 0;
-	binder[2 * count] = 0;
-	return binder;
-}
-
 static int beholddb_locate(const char *realpath, const char **tags)
 {
 	size_t tagcount_p, tagcount_m;
@@ -300,74 +287,36 @@ static int beholddb_locate(const char *realpath, const char **tags)
 		return tagcount_p ? -1 : 0;
 	}
 
-	// TODO: use temporary tables for tags
-	char *tags_p_binder = args_binder(tagcount_p);
-	char *tags_m_binder = args_binder(tagcount_m);
-	char *sql;
-	asprintf(&sql,
+	sqlite3_stmt *stmt;
+	const char *sql =
 		"select"
 			"(select count(*) from ("
-				"select t.id from tags t"
-				"where t.name in (%s)"
+				"select t.tag_id from include t"
 				"intersect"
 				"select ft.tag_id from files f"
 				"join files_tags ft on ft.file_id = f.id"
-				"where f.name = @file"
+				"where f.name = ?1"
 			")),"
 			"select count(*) from ("
-				"select t.id from tags t"
-				"where t.name in (%s)"
+				"select t.tag_id from exclude t"
 				"intersect"
 				"select ft.tag_id from files f"
 				"join files_tags ft on ft.file_id = f.id"
-				"where f.name = @file"
+				"where f.name = ?1"
 			")),"
 			"(select count(*) from ("
-				"select t.id from tags t"
-				"where t.name in (%s)"
+				"select t.tag_id from exclude t"
 				"intersect"
 				"select dt.tag_id from files f"
 				"join dirs_tags dt on dt.file_id = f.id"
-				"where f.name = @file"
+				"where f.name = ?1"
 			")),"
 			"(select f.type from files f"
-			"where f.name = @file)",
-		tags_p_binder, tags_m_binder, tags_m_binder);
-	free(tags_p_binder);
-	free(tags_m_binder);
-
-	sqlite3_stmt *stmt;
-	rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-	if (rc)
-	{
-		sqlite3_close(db);
-		return -1;
-	}
-
-	sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, "@file"), realpath, -1, SQLITE_STATIC);
-	int index = 1;
-	// add inclusive tags
-	while (*tags)
-	{
-		sqlite3_bind_text(stmt, index, *tags, -1, SQLITE_STATIC);
-		++tags;
-	}
-	++tags;
-	// skip @file parameter
-	while (sqlite3_bind_parameter_name(stmt, index))
-		++index;
-	// add exclusive tags
-	while (*tags)
-	{
-		// files_tags query
-		sqlite3_bind_text(stmt, index, *tags, -1, SQLITE_STATIC);
-		// dirs_tags query
-		sqlite3_bind_text(stmt, index + tagcount_m, *tags, -1, SQLITE_STATIC);
-		++tags;
-	}
-
-	// execute query
-	rc = sqlite3_step(stmt);
+			"where f.name = ?1)";
+	
+	(rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+	(rc = sqlite3_bind_text(stmt, 1, realpath, -1, SQLITE_STATIC)) ||
+	(rc = sqlite3_step(stmt));
 	if (rc)
 	{
 		sqlite3_finalize(stmt);
@@ -383,7 +332,6 @@ static int beholddb_locate(const char *realpath, const char **tags)
 		sqlite3_column_int(stmt, 1),
 		sqlite3_column_int(stmt, 2),
 	};
-
 	sqlite3_finalize(stmt);
 	sqlite3_close(db);
 
