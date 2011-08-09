@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <sqlite3ext.h>
-SQLITE_EXTENSION_INIT1
+extern const sqlite3_api_routines *sqlite3_api;
 
 #include "fs.h"
 
@@ -36,6 +36,7 @@ int fs_create(sqlite3 *db, void *pAux, int argc, const char *const *argv, sqlite
 	fs_vtab *pvtab = (fs_vtab*)sqlite3_malloc(sizeof(fs_vtab));
 	if (!pvtab)
 		return SQLITE_NOMEM;
+	pvtab->base.zErrMsg = NULL;
 	pvtab->db = db;
 	pvtab->path = sqlite3_mprintf("%s", argc > 3 ? argv[3] : (char*)pAux);
 
@@ -123,10 +124,10 @@ int fs_column(sqlite3_vtab_cursor *pCursor, sqlite3_context *pContext, int iCol)
 	switch (iCol)
 	{
 	case 0: // name
-		sqlite_result_text(pContext, pcur->result->d_name, -1, SQLITE_STATIC);
+		sqlite3_result_text(pContext, pcur->result->d_name, -1, SQLITE_STATIC);
 		break;
 	case 1: // type
-		sqlite_result_int(pContext, DT_DIR == pcur->result->d_type);
+		sqlite3_result_int(pContext, DT_DIR == pcur->result->d_type);
 		break;
 	default:
 		return SQLITE_INTERNAL;
