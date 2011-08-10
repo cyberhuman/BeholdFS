@@ -1,9 +1,10 @@
-#define _GNU_SOURCE
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sqlite3.h>
 
 #include "beholddb.h"
+#include "fs.h"
 
 int beholddb_parse_path(const char *path, char **realpath, char ***tags, int invert)
 {
@@ -103,10 +104,27 @@ static int beholddb_exec(sqlite3 *db, const char *sql)
 	return rc;
 }
 
-static int beholddb_init(sqlite3 *db)
+static int beholddb_init(sqlite3 *db)//, const char *path)
 {
-	return beholddb_exec(db,
+	//fs_create_module(db, path);
+	beholddb_exec(db,
 		"pragma foreign_keys = on;");
+	return SQLITE_OK; // TODO: handle errors
+}
+
+static int beholddb_start_transaction(sqlite3 *db)
+{
+	return beholddb_exec(db, "start transaction;");
+}
+
+static int beholddb_commit(sqlite3 *db)
+{
+	return beholddb_exec(db, "commit;");
+}
+
+static int beholddb_rollback(sqlite3 *db)
+{
+	return beholddb_exec(db, "rollback;");
 }
 
 static int beholddb_create_tables(sqlite3 *db)
@@ -126,17 +144,28 @@ static int beholddb_create_tables(sqlite3 *db)
 		"create table files_tags"
 		"("
 			"id integer primary key,"
-			"id_file integer not null references files(id) on delete cascade,"
-			"id_tag integer not null references tags(id) on delete cascade,"
+			"id_file integer not null references files(id),"// on delete cascade,"
+			"id_tag integer not null references tags(id),"// on delete cascade,"
 			"unique ( id_file, id_tag ) on conflict ignore"
 		");"
 		"create table dirs_tags"
 		"("
 			"id integer primary key,"
-			"id_file integer not null references files(id) on delete cascade,"
-			"id_tag integer not null references tags(id) on delete cascade,"
+			"id_file integer not null references files(id),"// on delete cascade,"
+			"id_tag integer not null references tags(id),"// on delete cascade,"
 			"unique ( id_file, id_tag ) on conflict ignore"
-		");");
+		");"
+		"create view strong_tags as "
+			"select dt.*, 1 type from dirs_tags dt "
+			"union "
+			"select ft.*, 0 type from files_tags ft "
+			"join files f on f.id = ft.id_file "
+			"where not f.type;"
+//		"create virtual table filesystem "
+//		"using sqlitefs;"
+//		"select f.id, fs.name, fs.type from filesystem fs "
+//		"left join files f on f.name = fs.name;"
+		);
 }
 
 static int beholddb_exec_bind_text(sqlite3 *db, const char *sql, const char *text)
@@ -150,11 +179,12 @@ static int beholddb_exec_bind_text(sqlite3 *db, const char *sql, const char *tex
 	return rc;
 }
 
-static int behloddb_exec_select_text(sqlite3 *db, const char *sql, char *buf, char **rows, int *count)
+static int behloddb_exec_select_text(sqlite3 *db, const char *sql, char *buf, char **rows, size_t *count, size_t *size)
 {
 	sqlite3_stmt *stmt;
 	int rc;
 	*count = 0;
+	*size = 0;
 	if (!(rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)))
 	{
 		while (SQLITE_ROW == (rc = sqlite3_step(stmt)))
@@ -165,6 +195,7 @@ static int behloddb_exec_select_text(sqlite3 *db, const char *sql, char *buf, ch
 			*rows++ = buf;
 			buf += len;
 			++*count;
+			*size += len;
 		}
 		if (SQLITE_DONE != rc)
 			*count = 0;
@@ -179,12 +210,12 @@ static int beholddb_set_tags_internal(sqlite3 *db, const char *sql_create,
 	if (!tags)
 		return 0;
 	beholddb_exec(db, sql_create);
-	beholddb_exec(db, "start transaction;");
+	beholddb_start_transaction(db);
 	for (; *tags; ++tags)
 		beholddb_exec_bind_text(db, sql_include, *tags);
 	for (++tags; *tags; ++tags)
 		beholddb_exec_bind_text(db, sql_exclude, *tags);
-	beholddb_exec(db, "commit;");
+	beholddb_commit(db);
 	return 0; // TODO: handle errors
 }
 
@@ -193,12 +224,12 @@ static int beholddb_set_tags(sqlite3 *db, const char **files_tags, const char **
 	beholddb_set_tags_internal(db,
 		"create temporary table include"
 		"("
-			"tag_id integer,"
+			"id_tag integer,"
 			"name text"
 		");"
 		"create temporary table exclude"
 		"("
-			"tag_id integer,"
+			"id_tag integer,"
 			"name text"
 		");",
 		"insert into include "
@@ -211,12 +242,12 @@ static int beholddb_set_tags(sqlite3 *db, const char **files_tags, const char **
 	beholddb_set_tags_internal(db,
 		"create temporary table dirs_include"
 		"("
-			"tag_id integer,"
+			"id_tag integer,"
 			"name text"
 		");"
 		"create temporary table dirs_exclude"
 		"("
-			"tag_id integer,"
+			"id_tag integer,"
 			"name text"
 		");",
 		"insert into dirs_include "
@@ -291,24 +322,24 @@ static int beholddb_locate(const char *realpath, const char **tags)
 	const char *sql =
 		"select"
 			"(select count(*) from ("
-				"select t.tag_id from include t"
+				"select t.id_tag from include t"
 				"intersect"
-				"select ft.tag_id from files f"
-				"join files_tags ft on ft.file_id = f.id"
+				"select ft.id_tag from files f"
+				"join files_tags ft on ft.id_file = f.id"
 				"where f.name = ?1"
 			")),"
 			"select count(*) from ("
-				"select t.tag_id from exclude t"
+				"select t.id_tag from exclude t"
 				"intersect"
-				"select ft.tag_id from files f"
-				"join files_tags ft on ft.file_id = f.id"
+				"select ft.id_tag from files f"
+				"join files_tags ft on ft.id_file = f.id"
 				"where f.name = ?1"
 			")),"
 			"(select count(*) from ("
-				"select t.tag_id from exclude t"
+				"select t.id_tag from exclude t"
 				"intersect"
-				"select dt.tag_id from files f"
-				"join dirs_tags dt on dt.file_id = f.id"
+				"select dt.id_tag from files f"
+				"join dirs_tags dt on dt.id_file = f.id"
 				"where f.name = ?1"
 			")),"
 			"(select f.type from files f"
@@ -325,7 +356,7 @@ static int beholddb_locate(const char *realpath, const char **tags)
 	}
 
 	// limit file type to 0 (file) and 1 (directory). just in case...
-	int file_type = sqlite3_column_int(stmt, 3) ? 1 : 0;
+	int file_type = !!sqlite3_column_int(stmt, 3);
 	int count_include = sqlite3_column_int(stmt, 0);
 	int count_exclude[2] =
 	{
@@ -353,19 +384,6 @@ int beholddb_get_file(const char *path, char **realpath, char ***tags)
 	return status;
 }
 
-// find location of the file by mixed path
-/*
-int beholddb_get_path(const char *path, char **realpath, char ***tags)
-{
-	int status = beholddb_parse_path(path, realpath, tags);
-	if (!status)
-	{
-		// that's probably it
-	}
-	return status;
-}
-*/
-
 // free memory for path and tags
 int beholddb_free_path(const char *realpath, const char **tags)
 {
@@ -380,9 +398,10 @@ static int beholddb_mark_internal(sqlite3 *db, const char *realpath, const char 
 	if (!file)
 		return 0;
 
+	int changes = 0;
 	beholddb_set_tags(db, files_tags, dirs_tags);
-	beholddb_exec(db,
-		"start transaction;");
+	beholddb_start_transaction(db);
+	/*
 	const char *sql_dir =
 		"insert into files ( type, name ) "
 		"values ( 1, ? )";
@@ -391,57 +410,83 @@ static int beholddb_mark_internal(sqlite3 *db, const char *realpath, const char 
 		"values ( 0, ? )";
 	const char *sql = dirs_tags ? sql_dir : sql_file;
 	beholddb_exec_bind_text(db, sql, file);
+	*/
 	beholddb_exec_bind_text(db,
-		"insert into files_tags ( file_id, tag_id ) "
+		"insert into files_tags ( id_file, id_tag ) "
 		"select f.id, t.id "
 		"from files f "
 		"join include t "
 		"where f.name = ?",
 		file);
-	int changes = sqlite3_changes(db);
+	changes += sqlite3_changes(db);
 	beholddb_exec_bind_text(db,
 		"delete from files_tags ft "
-		"where ft.file_id = "
+		"where ft.id_file = "
 			"( select f.id from files f where f.name = ? ) "
-		"and ft.tag_id in "
-			"( select t.tag_id from exclude t )",
+		"and ft.id_tag in "
+			"( select t.id_tag from exclude t )",
 		file);
 	changes += sqlite3_changes(db);
-	beholddb_exec(db,
-		"commit;");
+	beholddb_commit(db);
 	if (!changes)
 		return 0;
 
 	size_t tagcount_p, tagcount_m, tagsize_p, tagsize_m;
-	tags_stat(tags, &tagcount_p, &tagcount_m, &tagsize_p, &tagsize_m);
+	size_t pathlen, count, size;
+	char *path, *pathbuf;
+	char **rows, **pfiles_tags, **pdirs_tags;
 
-	size_t pathlen = file - realpath;
-	char *path = (char*)malloc(pathlen + 1), *pathbuf = path;
-	char **rows;
-	int count;
+	tags_stat(files_tags, &tagcount_p, &tagcount_m, &tagsize_p, &tagsize_m);
+	pathlen = file - realpath;
+	pathbuf = path = (char*)malloc(pathlen + 1 + tagsize_p + tagsize_m);
+	rows = (char**)calloc(2 * (tagcount_p + tagcount_m + 2), sizeof(char*));
 
 	memcpy(path, realpath, pathlen);
 	pathbuf += pathlen;
 	*pathbuf++ = 0;
 
-//static int behloddb_exec_select_text(sqlite3 *db, const char *sql, char *buf, char **rows, int *count)
+	pfiles_tags = rows;
+	memcpy(pfiles_tags, files_tags, (tagcount_p + 1) * sizeof(char*));
 	beholddb_exec_select_text(db,
-		"select t.tag_id from exclude t "
-		"join files_tags ft on ft.tag_id = t.tag_id",
+		"select t.name from exclude t "
+		"where not exists "
+			"(select * from files_tags ft "
+			"where ft.id_tag = t.id_tag)",
 		pathbuf,
-		rows,
-		&count);
+		pfiles_tags + tagcount_p + 1,
+		&count,
+		&size);
+	pfiles_tags[count++] = NULL;
+
+	pathbuf += size;
+	pdirs_tags = pfiles_tags + count;
+	beholddb_exec_select_text(db,
+		"select t.name from include t "
+		"where not exists "
+			"(select f.id, t.id_tag from files f "
+			"except "
+			"select st.id_file, st.id_tag from strong_tags st)";
+		pathbuf,
+		pdirs_tags,
+		&count,
+		&size);
+	pdirs_tags[count++] = NULL;
+	memcpy(pdirs_tags + count, files_tags + tagcount_p + 1, (tagcount_m + 1) * sizeof(char*));
+
+	beholddb_mark(path, pfiles_tags, pdirs_tags);
+	beholddb_free_path(path, rows);
+
 	// include => at least one file has this tag
 	//	include becomes include for parent's files_tags
-	//	include becomes exclude for parent's dirs_tags
+	//	include becomes include for parent's dirs_tags (filtered by 'all files have tag, all dirs have dirs_tag')
 	// exclude => at least one file has no tag
-	//	exclude becomes exclude for parent's files_tags only if there are no files with the corresponding tag
-	//	exclude becomes include for parent's dirs_tags only if there are no files with the corresponding tag
+	//	exclude becomes exclude for parent's dirs_tags
+	//	exclude becomes exclude for parent's files_tags (filtered by 'no files have tag')
 	return 0; // TODO: handle errors
 }
 
 // set tags for the file
-int beholddb_mark(const char *realpath, const char **tags, int type)
+int beholddb_mark(const char *realpath, const char **files_tags, const char **dirs_tags)
 {
 	if (!*realpath)
 		return 0;
