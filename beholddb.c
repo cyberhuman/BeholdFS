@@ -84,7 +84,7 @@ int beholddb_parse_path(const char *path, char **realpath, char ***tags, int inv
 
 static const char BEHOLDDB_NAME[] = ".beholdfs";
 
-static char *beholddb_get_db_name(const char *realpath)
+static char *beholddb_get_name(const char *realpath)
 {
 	char *ptr = strrchr(realpath, '/');
 	if (!ptr)
@@ -112,9 +112,55 @@ static int beholddb_init(sqlite3 *db)//, const char *path)
 	return SQLITE_OK; // TODO: handle errors
 }
 
-static int beholddb_start_transaction(sqlite3 *db)
+static int beholddb_open_read(const char *realpath, sqlite3 **db)
 {
-	return beholddb_exec(db, "start transaction;");
+	if (!*realpath)
+		return 0;
+	char *db_name = beholddb_get_name(realpath);
+	// if in root directory, assume success
+	if (!db_name)
+		return 0;
+
+	// open the database
+	int rc = sqlite3_open_v2(db_name, &db, SQLITE_OPEN_READONLY, NULL);
+	free(db_name);
+	if (rc || (rc = beholddb_init(db)))
+	{
+		sqlite3_close(db);
+		*db = NULL;
+	}
+	return rc;
+}
+
+static int beholddb_open_write(const char *realpath, sqlite3 **db)
+{
+	if (!*realpath)
+		return 0;
+	char *db_name = beholddb_get_name(realpath);
+	// if in root directory, assume success
+	if (!db_name)
+		return 0;
+
+	// open the database
+	int rc = sqlite3_open_v2(db_name, &db, SQLITE_OPEN_READWRITE, NULL);
+	free(db_name);
+	if (rc && SQLITE_CANTOPEN == rc)
+	{
+		sqlite3_close(db);
+		(rc = sqlite3_open_v2(db_name, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL)) ||
+		(rc = beholddb_create_tables(db));
+	}
+	if (rc || (rc = beholddb_init(db)))
+	{
+		sqlite3_close(db);
+		*db = NULL;
+	}
+	return rc;
+}
+
+static int beholddb_begin_transaction(sqlite3 *db)
+{
+	return beholddb_exec(db, "begin transaction;");
 }
 
 static int beholddb_commit(sqlite3 *db)
@@ -209,8 +255,8 @@ static int beholddb_set_tags_internal(sqlite3 *db, const char *sql_create,
 {
 	if (!tags)
 		return 0;
+	beholddb_begin_transaction(db);
 	beholddb_exec(db, sql_create);
-	beholddb_start_transaction(db);
 	for (; *tags; ++tags)
 		beholddb_exec_bind_text(db, sql_include, *tags);
 	for (++tags; *tags; ++tags)
@@ -221,6 +267,7 @@ static int beholddb_set_tags_internal(sqlite3 *db, const char *sql_create,
 
 static int beholddb_set_tags(sqlite3 *db, const char **files_tags, const char **dirs_tags)
 {
+	beholddb_begin_transaction(db);
 	beholddb_set_tags_internal(db,
 		"create temporary table include"
 		"("
@@ -257,6 +304,7 @@ static int beholddb_set_tags(sqlite3 *db, const char **files_tags, const char **
 		"select id, name from tags "
 		"where name = ?",
 		dirs_tags);
+	beholddb_commit(db);
 }
 
 // calculates number of entries in the list
@@ -291,32 +339,21 @@ static void tags_stat(const char **tags, size_t *count_p, size_t *count_m, size_
 
 static int beholddb_locate(const char *realpath, const char **tags)
 {
+	char *file = strrchr(realpath, '/');
+	if (!file++)
+		return 0;
+
 	size_t tagcount_p, tagcount_m;
 	tags_stat(tags, &tagcount_p, &tagcount_m, NULL, NULL);
 	// if no tags are defined, assume path exists
 	if (!tagcount_p && !tagcount_m)
 		return 0;
 
-	realpath = strrchr(realpath, '/');
-	// if in root directory, assume path exists
-	if (!realpath)
-		return 0;
-
-	char *db_name = beholddb_get_db_name(realpath);
-	// if in root directory, assume path exists
-	if (!db_name)
-		return 0;
-
-	// open the database
 	sqlite3 *db;
-	int rc = sqlite3_open_v2(db_name, &db, SQLITE_OPEN_READONLY, NULL);
-	free(db_name);
-	if (rc || beholddb_init(db))
-	{
-		sqlite3_close(db);
+	int rc = beholddb_open_read(realpath, &db);
+	if (rc)
 		// if inclusive tags are not defined, assume no error
 		return tagcount_p ? -1 : 0;
-	}
 
 	sqlite3_stmt *stmt;
 	const char *sql =
@@ -346,7 +383,7 @@ static int beholddb_locate(const char *realpath, const char **tags)
 			"where f.name = ?1)";
 	
 	(rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
-	(rc = sqlite3_bind_text(stmt, 1, realpath, -1, SQLITE_STATIC)) ||
+	(rc = sqlite3_bind_text(stmt, 1, file, -1, SQLITE_STATIC)) ||
 	(rc = sqlite3_step(stmt));
 	if (rc)
 	{
@@ -395,22 +432,14 @@ int beholddb_free_path(const char *realpath, const char **tags)
 static int beholddb_mark_internal(sqlite3 *db, const char *realpath, const char **files_tags, const char **dirs_tags)
 {
 	char *file = strrchr(realpath, '/');
-	if (!file)
+	if (!file++)
 		return 0;
 
 	int changes = 0;
 	beholddb_set_tags(db, files_tags, dirs_tags);
-	beholddb_start_transaction(db);
-	/*
-	const char *sql_dir =
-		"insert into files ( type, name ) "
-		"values ( 1, ? )";
-	const char *sql_file =
-		"insert into files ( type, name ) "
-		"values ( 0, ? )";
-	const char *sql = dirs_tags ? sql_dir : sql_file;
-	beholddb_exec_bind_text(db, sql, file);
-	*/
+
+	beholddb_begin_transaction(db);
+
 	beholddb_exec_bind_text(db,
 		"insert into files_tags ( id_file, id_tag ) "
 		"select f.id, t.id "
@@ -419,6 +448,7 @@ static int beholddb_mark_internal(sqlite3 *db, const char *realpath, const char 
 		"where f.name = ?",
 		file);
 	changes += sqlite3_changes(db);
+
 	beholddb_exec_bind_text(db,
 		"delete from files_tags ft "
 		"where ft.id_file = "
@@ -427,7 +457,30 @@ static int beholddb_mark_internal(sqlite3 *db, const char *realpath, const char 
 			"( select t.id_tag from exclude t )",
 		file);
 	changes += sqlite3_changes(db);
+
+	if (dirs_tags)
+	{
+		beholddb_exec_bind_text(db,
+			"insert into dirs_tags ( id_file, id_tag ) "
+			"select f.id, t.id "
+			"from files f "
+			"join dirs_include t "
+			"where f.name = ?",
+			file);
+		changes += sqlite3_changes(db);
+
+		beholddb_exec_bind_text(db,
+			"delete from dirs_tags ft "
+			"where ft.id_file = "
+				"( select f.id from files f where f.name = ? ) "
+			"and ft.id_tag in "
+				"( select t.id_tag from dirs_exclude t )",
+			file);
+		changes += sqlite3_changes(db);
+	}
+
 	beholddb_commit(db);
+
 	if (!changes)
 		return 0;
 
@@ -485,40 +538,47 @@ static int beholddb_mark_internal(sqlite3 *db, const char *realpath, const char 
 	return 0; // TODO: handle errors
 }
 
-// set tags for the file
-int beholddb_mark(const char *realpath, const char **files_tags, const char **dirs_tags)
+static int beholddb_mark2(const char *realpath, const char **files_tags, const char **dirs_tags)
 {
-	if (!*realpath)
-		return 0;
-	char *db_name = beholddb_get_db_name(realpath);
-	// if in root directory, assume success
-	if (!db_name)
-		return 0;
-
-	// open the database
 	sqlite3 *db;
-	int rc = sqlite3_open_v2(db_name, &db, SQLITE_OPEN_READWRITE, NULL);
-	free(db_name);
+	int rc = beholddb_open_write(realpath, &db);
 	if (rc)
-	{
-		sqlite3_close(db);
-		if (SQLITE_CANTOPEN != rc)
-			return -1;
-		rc = sqlite3_open_v2(db_name, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
-		if (rc || beholddb_create_tables(db))
-		{
-			sqlite3_close(db);
-			return -1;
-		}
-	}
-	if (beholddb_init(db))
-	{
-		sqlite3_close(db);
-		return -1;
-	}
-	rc = beholddb_mark_internal(db, realpath, tags, type);
+		return rc;
+
+	rc = beholddb_mark_internal(db, realpath, files_tags, dirs_tags);
 
 	sqlite3_close(db);
 	return rc;
+}
+
+int beholddb_mark(const char *realpath, const char **files)
+{
+	return beholddb_mark2(realpath, files, NULL);
+}
+
+// set tags for the file
+int beholddb_make_path(const char *realpath, const char **tags, int type)
+{
+	char *file = strrchr(realpath, '/');
+	if (!file++)
+		return 0;
+
+	sqlite3 *db;
+	int rc = beholddb_open_write(realpath, &db);
+	if (rc)
+		return rc;
+
+	char *sql = sqlite3_mprintf(
+		"insert into files ( type, name ) "
+		"values ( %d, ? )", !!type);
+	rc = beholddb_exec_bind_text(db, sql, file);
+	sqlite3_free(sql);
+
+	if (type)
+		rc = beholddb_mark2(db, realpath, NULL, NULL); else // TODO: DIR: include all tags
+		rc = beholddb_mark2(db, realpath, tags, NULL); // TODO: FILE: exclude all tags [?not mentioned explicitly]
+
+	sqlite3_close(db);
+	return rc; // TODO: error handling
 }
 
