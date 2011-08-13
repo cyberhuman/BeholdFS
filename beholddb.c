@@ -363,6 +363,8 @@ static int beholddb_set_tags(sqlite3 *db, const char *const *files_tags, const c
 static const char *const *list_stat(const char *const *list, size_t *count, size_t *len)
 {
 	*count = 0;
+	if (len)
+		*len = 0;
 	for (; *list; ++list)
 	{
 		syslog(LOG_DEBUG, "list_stat: %s", *list);
@@ -509,12 +511,13 @@ static int beholddb_mark_recursive(sqlite3 *db, const char *realpath, const char
 	tags_stat(files_tags, &tagcount_p, &tagcount_m, &tagsize_p, &tagsize_m);
 	pathbuf = path = (char*)malloc(pathlen + 1 + tagsize_p + tagsize_m);
 	rows = (const char**)calloc(2 * (tagcount_p + tagcount_m + 2), sizeof(char*));
-	syslog(LOG_DEBUG, "beholddb_mark_recursive: count_p=%d, count_m=%d", tagcount_p, tagcount_m);
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: count_p=%d, count_m=%d, size_p=%d, size_m=%d", tagcount_p, tagcount_m, tagsize_p, tagsize_m);
 
 	memcpy(path, realpath, pathlen);
 	pathbuf += pathlen;
 	*pathbuf++ = 0;
 
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 1");
 	// include => at least one file has this tag
 	// exclude => at least one file has no tag
 
@@ -522,6 +525,7 @@ static int beholddb_mark_recursive(sqlite3 *db, const char *realpath, const char
 	//	exclude becomes exclude for parent's files_tags (filtered by 'no files have tag')
 	pfiles_tags = rows;
 	memcpy(pfiles_tags, files_tags, (tagcount_p + 1) * sizeof(char*));
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 2");
 	beholddb_exec_select_text(db,
 		"select t.name from exclude t "
 		"where not exists "
@@ -531,7 +535,9 @@ static int beholddb_mark_recursive(sqlite3 *db, const char *realpath, const char
 		pfiles_tags + tagcount_p + 1,
 		&count,
 		&size);
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 3");
 	pfiles_tags[tagcount_p + 1 + count++] = NULL;
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 4");
 
 	//	include becomes include for parent's dirs_tags (filtered by 'all files have tag, all dirs have dirs_tag')
 	//	exclude becomes exclude for parent's dirs_tags
@@ -547,11 +553,16 @@ static int beholddb_mark_recursive(sqlite3 *db, const char *realpath, const char
 		pdirs_tags,
 		&count,
 		&size);
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 5");
 	pdirs_tags[count++] = NULL;
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 6");
 	memcpy(pdirs_tags + count, files_tags + tagcount_p + 1, (tagcount_m + 1) * sizeof(char*));
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 7");
 
 	beholddb_mark_object(path, pfiles_tags, pdirs_tags);
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 8");
 	beholddb_free_path(path, rows);
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: checkpoint 9");
 	return SQLITE_OK; // TODO: handle errors
 }
 
