@@ -4,14 +4,17 @@
 #include <sys/statvfs.h>
 #include <attr/xattr.h>
 #include <unistd.h>
+#include <stddef.h>
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <errno.h>
+#include <syslog.h>
 
 #include <fuse/fuse.h>
+//#include <fuse/fuse_opt.h>
 
 #include "beholdfs.h"
 #include "beholddb.h"
@@ -27,11 +30,18 @@ int beholdfs_getattr(const char *path, struct stat *stat)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_getattr(path=%s)", path);
+	//if (!(beholddb_parse_path(path, &realpath, &tags, 0)))
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = lstat(realpath, stat)))
-			ret = -errno;
+			ret = -errno; else
+		{
+//			if (!S_ISDIR(stat->st_mode) && beholddb_locate_file(realpath, tags))
+//				ret = -ENOENT;
+		}
 	}
+	syslog(LOG_DEBUG, "beholdfs_getattr: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -49,11 +59,13 @@ int beholdfs_readlink(const char *path, char *buf, size_t bufsiz)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_readlink(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = readlink(realpath, buf, bufsiz)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_readlink: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -69,12 +81,14 @@ int beholdfs_mknod(const char *path, mode_t mode, dev_t dev)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_mknod(path=%s)", path);
 	if (!(beholddb_parse_path(path, &realpath, &tags, 0)))
 	{
 		if ((ret = mknod(realpath, mode, dev)))
 			ret = -errno; else
 			beholddb_create_file(realpath, tags, 0);
 	}
+	syslog(LOG_DEBUG, "beholdfs_mknod: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -90,12 +104,14 @@ int beholdfs_mkdir(const char *path, mode_t mode)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_mkdir(path=%s)", path);
 	if (!(beholddb_parse_path(path, &realpath, &tags, 0)))
 	{
 		if ((ret = mkdir(realpath, mode)))
 			ret = -errno; else
 			beholddb_create_file(realpath, tags, 1);
 	}
+	syslog(LOG_DEBUG, "beholdfs_mkdir: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -106,12 +122,14 @@ int beholdfs_unlink(const char *path)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_unlink(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = unlink(realpath)))
 			ret = -errno; else
 			beholddb_delete_file(realpath);
 	}
+	syslog(LOG_DEBUG, "beholdfs_unlink: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -122,12 +140,14 @@ int beholdfs_rmdir(const char *path)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_rmdir(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = rmdir(realpath)))
 			ret = -errno; else
 			beholddb_delete_file(realpath);
 	}
+	syslog(LOG_DEBUG, "beholdfs_rmdir: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -136,9 +156,11 @@ int beholdfs_rmdir(const char *path)
 int beholdfs_symlink(const char *oldpath, const char *newpath)
 {
 	int ret = -ENOENT;
-
 	const char *oldrealpath, *const *oldtags;
 	const char *newrealpath, *const *newtags;
+
+	syslog(LOG_DEBUG, "beholdfs_symlink(oldpath=%s, newpath=%s)", oldpath, newpath);
+
 	int rc1 = beholddb_get_file(oldpath, &oldrealpath, &oldtags);
 	int rc2 = beholddb_parse_path(newpath, &newrealpath, &newtags, 0);
 
@@ -148,6 +170,8 @@ int beholdfs_symlink(const char *oldpath, const char *newpath)
 			ret = -errno; else
 			beholddb_create_file(newrealpath, newtags, 0); // TODO: how to deal with symlinks to directories?
 	}
+	syslog(LOG_DEBUG, "beholdfs_symlink: oldrealpath=%s, newrealpath=%s, ret=%d",
+		oldrealpath, newrealpath, ret);
 	if (!rc1)
 		beholddb_free_path(oldrealpath, oldtags);
 	if (!rc2)
@@ -159,9 +183,11 @@ int beholdfs_symlink(const char *oldpath, const char *newpath)
 int beholdfs_rename(const char *oldpath, const char *newpath)
 {
 	int ret = -ENOENT;
-
 	const char *oldrealpath, *const *oldtags;
 	const char *newrealpath, *const *newtags;
+
+	syslog(LOG_DEBUG, "beholdfs_rename(oldpath=%s, newpath=%s)", oldpath, newpath);
+
 	int rc1 = beholddb_get_file(oldpath, &oldrealpath, &oldtags);
 	int rc2 = beholddb_parse_path(newpath, &newrealpath, &newtags, 0);
 
@@ -170,14 +196,17 @@ int beholdfs_rename(const char *oldpath, const char *newpath)
 		if ((ret = rename(oldrealpath, newrealpath)))
 			ret = -errno; else
 		{
+			syslog(LOG_DEBUG, "beholdfs_rename: rename was successful");
 			// TODO: get file type
 			// TODO: optimize rename within the same directory
-			// TODO: add newtags to oldtags
+			// TODO: add newtags to oldtags!!!
 			beholddb_delete_file(oldrealpath);
 			beholddb_create_file(newrealpath, newtags, 0);
 			//beholddb_rename(oldrealpath, newrealpath);
 		}
 	}
+	syslog(LOG_DEBUG, "beholdfs_rename: oldrealpath=%s, newrealpath=%s, ret=%d",
+		oldrealpath, newrealpath, ret);
 	if (!rc1)
 		beholddb_free_path(oldrealpath, oldtags);
 	if (!rc2)
@@ -189,9 +218,11 @@ int beholdfs_rename(const char *oldpath, const char *newpath)
 int beholdfs_link(const char *oldpath, const char *newpath)
 {
 	int ret = -ENOENT;
-
 	const char *oldrealpath, *const *oldtags;
 	const char *newrealpath, *const *newtags;
+
+	syslog(LOG_DEBUG, "beholdfs_link(oldpath=%s, newpath=%s)", oldpath, newpath);
+
 	int rc1 = beholddb_get_file(oldpath, &oldrealpath, &oldtags);
 	int rc2 = beholddb_parse_path(newpath, &newrealpath, &newtags, 0);
 
@@ -201,6 +232,8 @@ int beholdfs_link(const char *oldpath, const char *newpath)
 			ret = -errno; else
 			beholddb_create_file(newrealpath, newtags, 0);
 	}
+	syslog(LOG_DEBUG, "beholdfs_link: oldrealpath=%s, newrealpath=%s, ret=%d",
+		oldrealpath, newrealpath, ret);
 	if (!rc1)
 		beholddb_free_path(oldrealpath, oldtags);
 	if (!rc2)
@@ -214,11 +247,13 @@ int beholdfs_chmod(const char *path, mode_t mode)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_chmod(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = chmod(realpath, mode)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_chmod: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -229,11 +264,13 @@ int beholdfs_chown(const char *path, uid_t owner, gid_t group)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_chown(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = chown(realpath, owner, group)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_chown: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -244,11 +281,13 @@ int beholdfs_truncate(const char *path, off_t length)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_truncate(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = truncate(realpath, length)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_truncate: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -274,12 +313,14 @@ int beholdfs_open(const char *path, struct fuse_file_info *fi)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_open(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
-		ret = 0;
 		if ((fi->fh = open(realpath, fi->flags)))
-			ret = -errno;
+			ret = -errno; else
+			ret = 0;
 	}
+	syslog(LOG_DEBUG, "beholdfs_open: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -333,11 +374,13 @@ int beholdfs_statfs(const char *path, struct statvfs *statv)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_statfs(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = statvfs(realpath, statv)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_statfs: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -415,11 +458,13 @@ int beholdfs_setxattr(const char *path, const char *name, const char *value, siz
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_setxattr(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = lsetxattr(realpath, name, value, size, flags)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_setxattr: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -430,11 +475,13 @@ int beholdfs_getxattr(const char *path, const char *name, char *value, size_t si
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_getxattr(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = lgetxattr(realpath, name, value, size)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_getxattr: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -445,11 +492,13 @@ int beholdfs_listxattr(const char *path, char *list, size_t size)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_listxattr(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = llistxattr(realpath, list, size)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_listxattr: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -460,11 +509,13 @@ int beholdfs_removexattr(const char *path, const char *name)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_removexattr(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = lremovexattr(realpath, name)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_removexattr: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -484,6 +535,7 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_opendir(path=%s)", path);
 	if (!beholddb_get_file(path, &realpath, &tags))
 	{
 		ret = 0;
@@ -494,11 +546,14 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 			struct beholdfs_dir *fsdir = (struct beholdfs_dir*)malloc(sizeof(struct beholdfs_dir));
 
 			fsdir->path = realpath;
+			fsdir->pathlen = strlen(realpath);
 			fsdir->tags = tags;
 			fsdir->dir = dir;
+			fsdir->entry = NULL;
 			fi->fh = (intptr_t)fsdir;
 		}
 	}
+	syslog(LOG_DEBUG, "beholdfs_opendir: realpath=%s, ret=%d", realpath, ret);
 	if (ret)
 		beholddb_free_path(realpath, tags);
 	return ret;
@@ -528,7 +583,40 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset,
 		struct fuse_file_info *fi)
 {
-	int ret;
+	struct beholdfs_dir *fsdir = (struct beholdfs_dir*)(intptr_t)fi->fh;
+	int ret = 0;
+	syslog(LOG_DEBUG, "beholdfs_readdir(path=%s, realpath=%s, offset=%d)", path, fsdir->path, (int)offset);
+
+	int len = offsetof(struct dirent, d_name) +
+		pathconf(".", _PC_NAME_MAX) + 1;
+	struct dirent *entry = (struct dirent*)malloc(len);
+
+	// TODO: optimize
+	while (NULL != fsdir->entry || !readdir_r(fsdir->dir, entry, &fsdir->entry) && NULL != fsdir->entry)
+	{
+		syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 0");
+		int filelen = strlen(fsdir->entry->d_name);
+		char *filepath = (char*)malloc(fsdir->pathlen + filelen + 2);
+		memcpy(filepath, fsdir->path, fsdir->pathlen);
+		filepath[fsdir->pathlen] = '/';
+		memcpy(filepath + fsdir->pathlen + 1, fsdir->entry->d_name, filelen + 1);
+
+		syslog(LOG_DEBUG, "beholdfs_readdir: filepath=%s, offset=%d", filepath, (int)offset);
+		if (!beholddb_locate_file(filepath, fsdir->tags))
+		{
+			syslog(LOG_DEBUG, "beholdfs_readdir: file exists (%s)", fsdir->entry->d_name);
+			if (filler(buffer, fsdir->entry->d_name, NULL, offset++))
+				break; // TODO: set ret to some value?
+			syslog(LOG_DEBUG, "beholdfs_readdir: file has been added (%s)", fsdir->entry->d_name);
+		}
+		syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 1");
+		free(filepath);
+		syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 2");
+		fsdir->entry = NULL;
+	}
+	syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 3");
+	free(entry);
+	syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 4");
 	return ret;
 }
 
@@ -540,6 +628,8 @@ int beholdfs_releasedir(const char *path, struct fuse_file_info *fi)
 {
 	struct beholdfs_dir *fsdir = (struct beholdfs_dir*)(intptr_t)fi->fh;
 
+	syslog(LOG_DEBUG, "beholdfs_releasedir(path=%s)", path);
+	closedir(fsdir->dir);
 	beholddb_free_path(fsdir->path, fsdir->tags);
 	free(fsdir);
 	return 0;
@@ -575,7 +665,9 @@ int beholdfs_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
  */
 void *beholdfs_init(struct fuse_conn_info *conn)
 {
+	syslog(LOG_DEBUG, "beholdfs_init()");
 	struct beholdfs_state *state = BEHOLDFS_STATE;
+
 	fchdir(state->rootdir);
 	close(state->rootdir);
 	return state;
@@ -590,7 +682,9 @@ void *beholdfs_init(struct fuse_conn_info *conn)
  */
 void beholdfs_destroy(void *private_data)
 {
+	syslog(LOG_DEBUG, "beholdfs_destroy()");
 	struct beholdfs_state *state = (struct beholdfs_state*)private_data;
+
 	free(state);
 }
 
@@ -610,11 +704,13 @@ int beholdfs_access(const char *path, int mode)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_access(path=%s)", path);
 	if (!beholddb_get_file(path, &realpath, &tags))
 	{
 		if ((ret = access(realpath, mode)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_access: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -636,14 +732,20 @@ int beholdfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
-	if (!(beholddb_parse_path(path, &realpath, &tags, 0)))
+	syslog(LOG_DEBUG, "beholdfs_create(path=%s)", path);
+	if (!beholddb_parse_path(path, &realpath, &tags, 0))
 	{
-		if ((ret = creat(realpath, mode)))
+		if (-1 == (fi->fh = creat(realpath, mode)))
 			ret = -errno; else
+		{
+			ret = 0;
 			beholddb_create_file(realpath, tags, 0);
+		}
 	}
+	syslog(LOG_DEBUG, "beholdfs_create: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
-	return ret;}
+	return ret;
+}
 
 /**
  * Change the size of an open file
@@ -735,11 +837,13 @@ int beholdfs_utimens(const char *path, const struct timespec times[2])
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
+	syslog(LOG_DEBUG, "beholdfs_utimens(path=%s)", path);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = utimensat(AT_FDCWD, realpath, times, AT_SYMLINK_NOFOLLOW)))
 			ret = -errno;
 	}
+	syslog(LOG_DEBUG, "beholdfs_utimens: realpath=%s, ret=%d", realpath, ret);
 	beholddb_free_path(realpath, tags);
 	return ret;
 }
@@ -841,7 +945,8 @@ struct fuse_operations beholdfs_operations =
 int main(int argc, char **argv)
 {
 	int opt;
-	while (-1 != (opt = getopt(argc, argv, "")))
+
+	while (-1 != (opt = getopt(argc, argv, "o:")))
 	{
 		switch (opt)
 		{
@@ -868,7 +973,10 @@ int main(int argc, char **argv)
 	struct beholdfs_state *state = (struct beholdfs_state*)malloc(sizeof(struct beholdfs_state));
 	state->rootdir = rootdir;
 
-	optind = 1;
-	return fuse_main(argc, argv, &beholdfs_operations, state);
+	optind = 0;
+	//struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+	int ret = fuse_main(argc, argv, &beholdfs_operations, state);
+	//fuse_opt_free_args(&args);
+	return ret;
 }
 
