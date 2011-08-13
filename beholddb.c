@@ -399,6 +399,11 @@ int beholddb_locate_file(const char *realpath, const char *const *tags)
 		syslog(LOG_DEBUG, "beholddb_locate_file: realpath is relative");
 		return 0;
 	}
+	if (!strcmp(file, BEHOLDDB_NAME))
+	{
+		syslog(LOG_DEBUG, "The file is a metadata file (%s)", file);
+		return -1;
+	}
 
 	size_t tagcount_p, tagcount_m;
 	tags_stat(tags, &tagcount_p, &tagcount_m, NULL, NULL);
