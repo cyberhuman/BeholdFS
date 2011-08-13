@@ -7,7 +7,7 @@
 #include "beholddb.h"
 #include "fs.h"
 
-static void tags_stat(const char *const *tags, size_t *count_p, size_t *count_m, size_t *len_p, size_t *len_m);
+char beholddb_tagchar;
 
 int beholddb_parse_path(const char *path, const char **realpath, const char *const **tags, int invert)
 {
@@ -30,7 +30,14 @@ int beholddb_parse_path(const char *path, const char **realpath, const char *con
 		}
 		switch (*path)
 		{
-		case '#':
+		default:
+			if (beholddb_tagchar != *path)
+			{
+				*pathptr++ = '/';
+				while (*path && '/' != *path)
+					*pathptr++ = *path++;
+				break;
+			}
 			do
 			{
 				// skip hash sign
@@ -44,19 +51,14 @@ int beholddb_parse_path(const char *path, const char **realpath, const char *con
 				// handle tag type
 				++tagcount[*path == '-' ^ !!invert];
 				// handle glued tags
-				while (*path && '/' != *path && '#' != *path)
+				while (*path && '/' != *path && beholddb_tagchar != *path)
 					*tagsptr++ = *path++;
 				*tagsptr++ = 0;
-			} while ('#' == *path);
+			} while (beholddb_tagchar == *path);
 		case '/':
-			// remove redundant slashes
+			; // remove redundant slashes
 		case 0:
-			// remove trailing slash
-			break;
-		default:
-			*pathptr++ = '/';
-			while (*path && '/' != *path)
-				*pathptr++ = *path++;
+			; // remove trailing slash
 		}
 	}
 
@@ -82,7 +84,7 @@ int beholddb_parse_path(const char *path, const char **realpath, const char *con
 			++pathptr;
 		// store tag
 		tagsarr[tagcount[minus ^ !!invert]++] = pathptr;
-		syslog(LOG_DEBUG, "new tag: #%s%s%s", invert ? "!" : "", minus ? "-" : "", pathptr);
+		syslog(LOG_DEBUG, "new tag: %c%s%s%s", beholddb_tagchar, invert ? "!" : "", minus ? "-" : "", pathptr);
 	}
 	// terminate tags lists
 	tagsarr[tagcount[0]] = NULL;
@@ -92,7 +94,6 @@ int beholddb_parse_path(const char *path, const char **realpath, const char *con
 		pathbuf, tagcount[0], tagcount[1]);
 	*realpath = pathbuf;
 	*tags = tagsarr;
-	tags_stat(*tags, &tagcount[0], &tagcount[1], NULL, NULL);
 	return 0;
 }
 
@@ -503,6 +504,7 @@ static int beholddb_mark_recursive(sqlite3 *db, const char *realpath, const char
 	tags_stat(files_tags, &tagcount_p, &tagcount_m, &tagsize_p, &tagsize_m);
 	pathbuf = path = (char*)malloc(pathlen + 1 + tagsize_p + tagsize_m);
 	rows = (const char**)calloc(2 * (tagcount_p + tagcount_m + 2), sizeof(char*));
+	syslog(LOG_DEBUG, "beholddb_mark_recursive: count_p=%d, count_m=%d", tagcount_p, tagcount_m);
 
 	memcpy(path, realpath, pathlen);
 	pathbuf += pathlen;
@@ -524,12 +526,12 @@ static int beholddb_mark_recursive(sqlite3 *db, const char *realpath, const char
 		pfiles_tags + tagcount_p + 1,
 		&count,
 		&size);
-	pfiles_tags[count++] = NULL;
+	pfiles_tags[tagcount_p + 1 + count++] = NULL;
 
 	//	include becomes include for parent's dirs_tags (filtered by 'all files have tag, all dirs have dirs_tag')
 	//	exclude becomes exclude for parent's dirs_tags
 	pathbuf += size;
-	pdirs_tags = pfiles_tags + count;
+	pdirs_tags = pfiles_tags + tagcount_p + 1 + count;
 	beholddb_exec_select_text(db,
 		"select t.name from include t "
 		"where not exists "
@@ -603,7 +605,11 @@ static int beholddb_mark(sqlite3 *db, const char *realpath, const char *const *f
 
 	int changes;
 
+	syslog(LOG_DEBUG, "beholddb_mark(%s)", realpath);
+
 	//beholddb_begin_transaction(db);
+	beholddb_create_tags(db, files_tags);
+	//?beholddb_create_tags(db, dirs_tags);
 	beholddb_set_tags(db, files_tags, dirs_tags);
 	beholddb_mark_worker(db, file, &changes);
 	//beholddb_commit(db);

@@ -6,6 +6,7 @@
 struct beholdfs_state
 {
 	int rootdir;
+	char tagchar;
 };
 
 struct beholdfs_dir

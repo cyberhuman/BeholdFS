@@ -31,14 +31,14 @@ int beholdfs_getattr(const char *path, struct stat *stat)
 	const char *realpath, *const *tags;
 
 	syslog(LOG_DEBUG, "beholdfs_getattr(path=%s)", path);
-	//if (!(beholddb_parse_path(path, &realpath, &tags, 0)))
-	if (!(beholddb_get_file(path, &realpath, &tags)))
+	if (!(beholddb_parse_path(path, &realpath, &tags, 0)))
+	//if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
 		if ((ret = lstat(realpath, stat)))
 			ret = -errno; else
 		{
-//			if (!S_ISDIR(stat->st_mode) && beholddb_locate_file(realpath, tags))
-//				ret = -ENOENT;
+			if (!S_ISDIR(stat->st_mode) && beholddb_locate_file(realpath, tags))
+				ret = -ENOENT;
 		}
 	}
 	syslog(LOG_DEBUG, "beholdfs_getattr: realpath=%s, ret=%d", realpath, ret);
@@ -670,6 +670,9 @@ void *beholdfs_init(struct fuse_conn_info *conn)
 
 	fchdir(state->rootdir);
 	close(state->rootdir);
+
+	extern char beholddb_tagchar;
+	beholddb_tagchar = state->tagchar;
 	return state;
 }
 
@@ -972,6 +975,9 @@ int main(int argc, char **argv)
 
 	struct beholdfs_state *state = (struct beholdfs_state*)malloc(sizeof(struct beholdfs_state));
 	state->rootdir = rootdir;
+	state->tagchar = '%';
+
+	//setlogmask(LOG_UPTO(LOG_NOTICE));
 
 	optind = 0;
 	//struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
