@@ -200,8 +200,10 @@ int beholdfs_rename(const char *oldpath, const char *newpath)
 			// TODO: get file type
 			// TODO: optimize rename within the same directory
 			// TODO: add newtags to oldtags!!!
-			beholddb_delete_file(oldrealpath);
-			beholddb_create_file(newrealpath, newtags, 0);
+			const char *const *oldtags;
+			beholddb_delete_file_with_tags(oldrealpath, &oldtags);
+			beholddb_create_file_with_tags(newrealpath, oldtags, newtags, 0);
+			beholddb_free_tags(oldtags);
 			//beholddb_rename(oldrealpath, newrealpath);
 		}
 	}
@@ -313,10 +315,10 @@ int beholdfs_open(const char *path, struct fuse_file_info *fi)
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
 
-	syslog(LOG_DEBUG, "beholdfs_open(path=%s)", path);
+	syslog(LOG_DEBUG, "beholdfs_open(path=%s, flags=%2x)", path, fi->flags);
 	if (!(beholddb_get_file(path, &realpath, &tags)))
 	{
-		if ((fi->fh = open(realpath, fi->flags)))
+		if (-1 == (fi->fh = open(realpath, fi->flags)))
 			ret = -errno; else
 			ret = 0;
 	}

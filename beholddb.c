@@ -247,7 +247,7 @@ static int beholddb_exec_bind_text(sqlite3 *db, const char *sql, const char *tex
 	(rc = sqlite3_step(stmt));
 	if (SQLITE_ROW == rc)
 		rc = SQLITE_OK;
-	syslog(LOG_DEBUG, "beholddb_exec_bind_text: sql=%s, text=%s, rc=%d", sql, text, rc);
+	syslog(LOG_DEBUG, "beholddb_exec_bind_text: sql=%s, text=%s, rc=%d, err=%s", sql, text, rc, sqlite3_errmsg(db));
 	sqlite3_finalize(stmt);
 	return rc;
 }
@@ -749,14 +749,16 @@ static int beholddb_get_tags(sqlite3 *db, const char *const **files_tags, const 
 
 static int beholddb_get_file_tags(sqlite3 *db, const char *file, const char *const **tags)
 {
-	// TODO: optimize
-	beholddb_exec_bind_text(db,
+	char *sql = sqlite3_mprintf(
 		"create temp view tag_store as "
 		"select t.name from tags t "
 		"join files_tags ft on ft.id_tag = t.id "
 		"join files f on f.id = ft.id_file "
-		"where f.name = ?",
+		"where f.name = '%q'",
 		file);
+	// TODO: optimize
+	beholddb_exec(db, sql);
+	sqlite3_free(sql);
 	beholddb_get_tags_worker(db,
 		"select count(*), 0 from tag_store",
 		"select name from tag_store "
@@ -769,7 +771,7 @@ static int beholddb_get_file_tags(sqlite3 *db, const char *file, const char *con
 	return SQLITE_OK;
 }
 
-static void beholddb_free_tags(const char *const *tags)
+void beholddb_free_tags(const char *const *tags)
 {
 	if (!tags)
 		return;
@@ -783,7 +785,7 @@ static void beholddb_free_tags(const char *const *tags)
 
 static const char *no_tags[] = { NULL, NULL };
 
-int beholddb_create_file(const char *realpath, const char *const *tags, int type)
+int beholddb_create_file_with_tags(const char *realpath, const char *const *oldtags, const char *const *tags, int type)
 {
 	syslog(LOG_DEBUG, "beholddb_create_file(realpath=%s)", realpath);
 
@@ -816,9 +818,17 @@ int beholddb_create_file(const char *realpath, const char *const *tags, int type
 	if (type)
 		tags = no_tags;
 	beholddb_create_tags(db, tags);
+	if (oldtags)
+	{
+		beholddb_create_tags(db, oldtags);
+		beholddb_set_tags(db, oldtags, NULL);
+	}
 	beholddb_set_tags(db, tags, NULL);
 	syslog(LOG_DEBUG, "beholddb_create_file: checkpoint 3");
 	beholddb_exec(db,
+		"delete from include "
+		"where id in "
+		"(select id from exclude);"
 		"insert into exclude "
 		"select id, name from tags "
 		"except "
@@ -840,7 +850,12 @@ int beholddb_create_file(const char *realpath, const char *const *tags, int type
 	return rc; // TODO: error handling
 }
 
-int beholddb_delete_file_worker(const char *realpath, const char *const **oldtags)
+int beholddb_create_file(const char *realpath, const char *const *tags, int type)
+{
+	return beholddb_create_file_with_tags(realpath, NULL, tags, type);
+}
+
+int beholddb_delete_file_with_tags(const char *realpath, const char *const **oldtags)
 {
 	syslog(LOG_DEBUG, "beholddb_delete_file(realpath=%s)", realpath);
 	char *file = strrchr(realpath, '/');
@@ -896,5 +911,5 @@ int beholddb_delete_file_worker(const char *realpath, const char *const **oldtag
 
 int beholddb_delete_file(const char *realpath)
 {
-	return beholddb_delete_file_worker(realpath, NULL);
+	return beholddb_delete_file_with_tags(realpath, NULL);
 }
