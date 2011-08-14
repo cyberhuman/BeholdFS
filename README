@@ -5,3 +5,4 @@ Known problems:
 - readdir() is terribly slow
 - tags are not shown in the directory structure (for less frequently used tags, in '%' subdirectory)
 
+
