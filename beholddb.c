@@ -1,3 +1,4 @@
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -121,9 +122,17 @@ static int beholddb_exec(sqlite3 *db, const char *sql)
 	return rc;
 }
 
-static int beholddb_init(sqlite3 *db)//, const char *path)
+static int beholddb_init(sqlite3 *db, const char *realpath)
 {
-	//fs_create_module(db, path);
+	char *file = strrchr(realpath, '/');
+	if (!file)
+		return -1;
+	char *path = (char*)malloc(file - realpath + 1);
+	memcpy(path, realpath, file - realpath);
+	path[file - realpath] = 0;
+	fs_create_module(db, path);
+	free(path);
+
 	//sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_FKEY, 1, NULL);
 	beholddb_exec(db, "pragma foreign_keys = on;");
 	sqlite3_extended_result_codes(db, 1);
@@ -132,6 +141,10 @@ static int beholddb_init(sqlite3 *db)//, const char *path)
 
 static int beholddb_create_tables(sqlite3 *db)
 {
+	// ignore return value, as there is 'if not exists' cannot be used with virtual table
+	beholddb_exec(db,
+		"create virtual table filesystem "
+		"using sqlitefs;");
 	return beholddb_exec(db,
 		"create table if not exists files "
 		"("
@@ -163,12 +176,7 @@ static int beholddb_create_tables(sqlite3 *db)
 			"union "
 			"select ft.*, 0 type from files_tags ft "
 			"join files f on f.id = ft.id_file "
-			"where not f.type;"
-//		"create virtual table filesystem "
-//		"using sqlitefs;"
-//		"select f.id, fs.name, fs.type from filesystem fs "
-//		"left join files f on f.name = fs.name;"
-		);
+			"where not f.type;");
 }
 
 static int beholddb_open_read(const char *realpath, sqlite3 **db)
@@ -176,14 +184,17 @@ static int beholddb_open_read(const char *realpath, sqlite3 **db)
 	if (!*realpath)
 		return 0;
 	char *db_name = beholddb_get_name(realpath);
-	// if in root directory, assume success
+	// if in root directory, assume success?
 	if (!db_name)
+	{
+		*db = NULL;
 		return 0;
+	}
 
 	// open the database
 	int rc = sqlite3_open_v2(db_name, db, SQLITE_OPEN_READWRITE, NULL);
 	free(db_name);
-	if (rc || (rc = beholddb_init(*db)))
+	if (rc || (rc = beholddb_init(*db, realpath)) || (rc = beholddb_create_tables(*db)))
 	{
 		sqlite3_close(*db);
 		*db = NULL;
@@ -210,11 +221,10 @@ static int beholddb_open_write(const char *realpath, sqlite3 **db)
 	if (rc && SQLITE_CANTOPEN == rc)
 	{
 		sqlite3_close(*db);
-		(rc = sqlite3_open_v2(db_name, db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL)) ||
-		(rc = beholddb_create_tables(*db));
+		(rc = sqlite3_open_v2(db_name, db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL));
 		syslog(LOG_DEBUG, "beholddb_open_write: second open result=%d", rc);
 	}
-	if (rc || (rc = beholddb_init(*db)))
+	if (rc || (rc = beholddb_init(*db, realpath)) || (rc = beholddb_create_tables(*db)))
 	{
 		sqlite3_close(*db);
 		*db = NULL;
@@ -371,7 +381,6 @@ static const char *beholddb_ddl_dirs_tags =
 
 static int beholddb_set_tags(sqlite3 *db, const char *const *files_tags, const char *const *dirs_tags)
 {
-	//beholddb_begin_transaction(db);
 	beholddb_set_tags_worker(db,
 		beholddb_ddl_files_tags,
 		"insert into include "
@@ -390,7 +399,6 @@ static int beholddb_set_tags(sqlite3 *db, const char *const *files_tags, const c
 		"select id, name from tags "
 		"where name = ?",
 		dirs_tags);
-	//beholddb_commit(db);
 }
 
 // calculates number of entries in the list
@@ -665,12 +673,10 @@ static int beholddb_mark(sqlite3 *db, const char *realpath, const char *const *f
 
 	syslog(LOG_DEBUG, "beholddb_mark(%s)", realpath);
 
-	//beholddb_begin_transaction(db);
 	beholddb_create_tags(db, files_tags);
 	//?beholddb_create_tags(db, dirs_tags);
 	beholddb_set_tags(db, files_tags, dirs_tags);
 	beholddb_mark_worker(db, file, &changes);
-	//beholddb_commit(db);
 	if (!changes)
 		return 0;
 
@@ -760,7 +766,6 @@ static int beholddb_get_tags_worker(sqlite3 *db, const char *sql_count, const ch
 
 static int beholddb_get_tags(sqlite3 *db, const char *const **files_tags, const char *const **dirs_tags)
 {
-	//beholddb_begin_transaction(db);
 	beholddb_get_tags_worker(db,
 		"select "
 			"(select count(*) from include), "
@@ -785,7 +790,6 @@ static int beholddb_get_tags(sqlite3 *db, const char *const **files_tags, const 
 		"union all "
 		"select NULL ",
 		dirs_tags);
-	//beholddb_commit(db);
 	return SQLITE_OK; // TODO: handle errors
 }
 
@@ -1009,4 +1013,101 @@ int beholddb_rename_file(const char *oldrealpath, const char *newrealpath, const
 	return 0; // TODO: error handling
 }
 
+struct beholddb_dir
+{
+	sqlite3 *db;
+	sqlite3_stmt *stmt;
+	const char *result;
+};
+
+int beholddb_opendir(const char *realpath, const char *const *tags, void **handle)
+{
+	syslog(LOG_DEBUG, "beholddb_opendir(realpath=%s)", realpath);
+
+	int rc;
+	sqlite3 *db;
+	sqlite3_stmt *stmt;
+
+	int pathlen = strlen(realpath);
+	char *dbpath = (char*)malloc(pathlen + 3);
+	memcpy(dbpath, realpath, pathlen);
+	dbpath[pathlen++] = '/';
+	dbpath[pathlen++] = '.';
+	dbpath[pathlen++] = 0;
+	rc = beholddb_open_read(dbpath, &db);
+	free(dbpath);
+	if (rc)
+		return -1;
+
+	size_t tagcount_p, tagcount_m;
+	tags_stat(tags, &tagcount_p, &tagcount_m, NULL, NULL);
+	beholddb_set_tags(db, tags, NULL);
+
+	char *sql = sqlite3_mprintf(
+		//"select f.name from files f "
+		//"join filesystem fs on fs.name = f.name and fs.type = f.type "
+		//"where "
+		"select fs.name from filesystem fs "
+		"where exists("
+			"select * from files f "
+			"where f.name = fs.name and f.type = fs.type and "
+			"%d = (select count(*) from ( "
+				"select t.id from include t "
+				"join files_tags ft on ft.id_tag = t.id "
+				"where ft.id_file = f.id "
+			")) and "
+			"%d = (select count(*) from ( "
+				"select t.id from exclude t "
+				"join strong_tags st on st.id_tag = t.id "
+				"where st.id_file = f.id "
+			")))",
+		tagcount_p, 0);
+	(rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL));
+	sqlite3_free(sql);
+	if (!rc)
+	{
+		struct beholddb_dir *dir = (struct beholddb_dir*)malloc(sizeof(struct beholddb_dir));
+		dir->db = db;
+		dir->stmt = stmt;
+		dir->result = NULL;
+		*handle = (void*)dir;
+	}
+	return rc;
+}
+
+int beholddb_readdir(void *handle, void *buffer, int (*filler)(void*, const char*, const struct stat*, off_t), int offset)
+{
+	int rc = SQLITE_ROW;
+	struct beholddb_dir *dir = (struct beholddb_dir*)handle;
+
+	if (!dir->stmt)
+		return 0;
+	do
+	{
+		//syslog(LOG_DEBUG, "beholddb_readdir: dir->result=%s", dir->result);
+		if (!dir->result && SQLITE_ROW == (rc = sqlite3_step(dir->stmt)))
+			dir->result = sqlite3_column_text(dir->stmt, 0);
+		//syslog(LOG_DEBUG, "beholddb_readdir: dir->result=%s, rc=%d", dir->result, rc);
+		if (dir->result && !filler(buffer, dir->result, NULL, offset++))
+			dir->result = NULL;
+	} while (!dir->result && SQLITE_ROW == rc);
+	if (SQLITE_ROW != rc)
+	{
+		sqlite3_finalize(dir->stmt);
+		dir->stmt = NULL;
+	}
+	//syslog(LOG_DEBUG, "beholddb_readdir exit: dir->result=%s, rc=%d", dir->result, rc);
+	return 0;
+}
+
+int beholddb_closedir(void *handle)
+{
+	if (!handle)
+		return 0;
+	struct beholddb_dir *dir = (struct beholddb_dir*)handle;
+	sqlite3_finalize(dir->stmt);
+	sqlite3_close(dir->db);
+	free(dir);
+	return 0;
+}
 

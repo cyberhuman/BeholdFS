@@ -4,8 +4,8 @@
 #include <string.h>
 #include <stddef.h>
 #include <unistd.h>
-#include <sqlite3ext.h>
-extern const sqlite3_api_routines *sqlite3_api;
+#include <sqlite3.h>
+//extern const sqlite3_api_routines *sqlite3_api;
 
 #include "fs.h"
 

@@ -12,10 +12,7 @@ struct beholdfs_state
 struct beholdfs_dir
 {
 	DIR *dir;
-	const char *path;
-	int pathlen;
-	const char *const *tags;
-	struct dirent *entry;
+	void *handle;
 };
 
 #define BEHOLDFS_STATE ((struct beholdfs_state*)fuse_get_context()->private_data)

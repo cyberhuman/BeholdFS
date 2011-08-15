@@ -537,23 +537,22 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 	if (!beholddb_get_file(path, &realpath, &tags))
 	{
 		ret = 0;
+		void *handle;
 		DIR *dir = opendir(realpath);
 		if (!dir)
 			ret = -errno; else
 		{
+			beholddb_opendir(realpath, tags, &handle); // TODO: handle errors
+
 			struct beholdfs_dir *fsdir = (struct beholdfs_dir*)malloc(sizeof(struct beholdfs_dir));
 
-			fsdir->path = realpath;
-			fsdir->pathlen = strlen(realpath);
-			fsdir->tags = tags;
 			fsdir->dir = dir;
-			fsdir->entry = NULL;
+			fsdir->handle = handle;
 			fi->fh = (intptr_t)fsdir;
 		}
 	}
 	syslog(LOG_DEBUG, "beholdfs_opendir: realpath=%s, ret=%d", realpath, ret);
-	if (ret)
-		beholddb_free_path(realpath, tags);
+	beholddb_free_path(realpath, tags);
 	return ret;
 }
 
@@ -583,35 +582,9 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 {
 	struct beholdfs_dir *fsdir = (struct beholdfs_dir*)(intptr_t)fi->fh;
 	int ret = 0;
-	syslog(LOG_DEBUG, "beholdfs_readdir(path=%s, realpath=%s, offset=%d)", path, fsdir->path, (int)offset);
 
-	int len = offsetof(struct dirent, d_name) +
-		pathconf(".", _PC_NAME_MAX) + 1;
-	struct dirent *entry = (struct dirent*)malloc(len);
-
-	while (NULL != fsdir->entry || !(ret = -readdir_r(fsdir->dir, entry, &fsdir->entry)) && NULL != fsdir->entry)
-	{
-		int filelen = strlen(fsdir->entry->d_name);
-		char *filepath = (char*)malloc(fsdir->pathlen + filelen + 2);
-		memcpy(filepath, fsdir->path, fsdir->pathlen);
-		filepath[fsdir->pathlen] = '/';
-		memcpy(filepath + fsdir->pathlen + 1, fsdir->entry->d_name, filelen + 1);
-
-		syslog(LOG_DEBUG, "beholdfs_readdir: filepath=%s, offset=%d", filepath, (int)offset);
-		// TODO: optimize
-		// the next call opens the same database each time, need to optimize
-		if (!beholddb_locate_file(filepath, fsdir->tags))
-		{
-			syslog(LOG_DEBUG, "beholdfs_readdir: file exists (%s)", fsdir->entry->d_name);
-			if (filler(buffer, fsdir->entry->d_name, NULL, offset++))
-				break; // TODO: set ret to some value?
-			syslog(LOG_DEBUG, "beholdfs_readdir: file has been added (%s)", fsdir->entry->d_name);
-		}
-		free(filepath);
-		fsdir->entry = NULL;
-	}
-	free(entry);
-	return ret;
+	syslog(LOG_DEBUG, "beholdfs_readdir(path=%s, offset=%d)", path, (int)offset);
+	return beholddb_readdir(fsdir->handle, buffer, filler, offset);
 }
 
 /** Release directory
@@ -623,8 +596,8 @@ int beholdfs_releasedir(const char *path, struct fuse_file_info *fi)
 	struct beholdfs_dir *fsdir = (struct beholdfs_dir*)(intptr_t)fi->fh;
 
 	syslog(LOG_DEBUG, "beholdfs_releasedir(path=%s)", path);
+	beholddb_closedir(fsdir->handle);
 	closedir(fsdir->dir);
-	beholddb_free_path(fsdir->path, fsdir->tags);
 	free(fsdir);
 	return 0;
 }
