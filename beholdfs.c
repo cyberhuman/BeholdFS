@@ -199,11 +199,7 @@ int beholdfs_rename(const char *oldpath, const char *newpath)
 			syslog(LOG_DEBUG, "beholdfs_rename: rename was successful");
 			// TODO: get file type
 			// TODO: optimize rename within the same directory
-			// TODO: add newtags to oldtags!!!
-			const char *const *oldtags;
-			beholddb_delete_file_with_tags(oldrealpath, &oldtags);
-			beholddb_create_file_with_tags(newrealpath, oldtags, newtags, 0);
-			beholddb_free_tags(oldtags);
+			beholddb_rename_file(oldrealpath, newrealpath, newtags);
 			//beholddb_rename(oldrealpath, newrealpath);
 		}
 	}
@@ -593,10 +589,8 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 		pathconf(".", _PC_NAME_MAX) + 1;
 	struct dirent *entry = (struct dirent*)malloc(len);
 
-	// TODO: optimize
-	while (NULL != fsdir->entry || !readdir_r(fsdir->dir, entry, &fsdir->entry) && NULL != fsdir->entry)
+	while (NULL != fsdir->entry || !(ret = -readdir_r(fsdir->dir, entry, &fsdir->entry)) && NULL != fsdir->entry)
 	{
-		syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 0");
 		int filelen = strlen(fsdir->entry->d_name);
 		char *filepath = (char*)malloc(fsdir->pathlen + filelen + 2);
 		memcpy(filepath, fsdir->path, fsdir->pathlen);
@@ -604,6 +598,8 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 		memcpy(filepath + fsdir->pathlen + 1, fsdir->entry->d_name, filelen + 1);
 
 		syslog(LOG_DEBUG, "beholdfs_readdir: filepath=%s, offset=%d", filepath, (int)offset);
+		// TODO: optimize
+		// the next call opens the same database each time, need to optimize
 		if (!beholddb_locate_file(filepath, fsdir->tags))
 		{
 			syslog(LOG_DEBUG, "beholdfs_readdir: file exists (%s)", fsdir->entry->d_name);
@@ -611,14 +607,10 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 				break; // TODO: set ret to some value?
 			syslog(LOG_DEBUG, "beholdfs_readdir: file has been added (%s)", fsdir->entry->d_name);
 		}
-		syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 1");
 		free(filepath);
-		syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 2");
 		fsdir->entry = NULL;
 	}
-	syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 3");
 	free(entry);
-	syslog(LOG_DEBUG, "beholdfs_readdir: checkpoint 4");
 	return ret;
 }
 

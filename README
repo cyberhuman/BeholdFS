@@ -1,8 +1,53 @@
+BeholdFS is a tagging file system.
+
+EXAMPLE USAGE:
+
+Mount:
+	$ ./beholdfs <rootdir> <mountpoint>
+
+Create a file with a set of tags:
+	$ touch %tag1%tag2%tag3/file1
+	or
+	$ touch %tag1/%tag2/%tag3/file2
+	or even
+	$ touch %/tag1/%/tag2/%/tag3/file3
+
+Add tags to a file:
+	$ mv file1 %newtag
+	or
+	$ mv file2 %newtag1%newtag2
+	etc.
+
+Remove tags from a file:
+	$ mv file1 %-notwantedtag
+	or
+	$ mv file2 %-tag1%-tag2
+
+Add and remove tags at the same time:
+	$ mv file3 %addtag%-removetag
+
+Add/remove tags, rename and move to a different directory:
+	$ mv file4 dir/%moved%-here/file5
+
+List files with a specific tag(s):
+	$ ls %tag1%tag2
+	or
+	$ ls %tag1/%tag2
+	etc.
+
+List files without a specific tag(s):
+	$ ls %-tag1%-tag2
+	or
+	$ ls %-tag1/%-tag2
+	etc.
+
+Directories are included in the %tag listing if at least one file under the directory has the %tag.
+Directories are excluded from the %-tag listing if all of the files under the directory have the %tag.
+
 This is still work in progress. Do not expect much.
 
 Known problems:
-- dirs_tags are not preserved for directories upon rename (renamed directory won't be filtered out by exclusive tags)
-- readdir() is terribly slow
+- readdir() is terribly slow (beholddb_locate_file() opens database for each file in the directory)
 - tags are not shown in the directory structure (for less frequently used tags, in '%' subdirectory)
-
+- metadata (database file) is never deleted, so 'empty' directories cannot be removed
 
