@@ -1044,13 +1044,10 @@ int beholddb_opendir(const char *realpath, const char *const *tags, void **handl
 	beholddb_set_tags(db, tags, NULL);
 
 	char *sql = sqlite3_mprintf(
-		//"select f.name from files f "
-		//"join filesystem fs on fs.name = f.name and fs.type = f.type "
-		//"where "
 		"select fs.name from filesystem fs "
-		"where exists("
-			"select * from files f "
-			"where f.name = fs.name and f.type = fs.type and "
+		"left outer join files f on f.name = fs.name and f.type = fs.type "
+		"where "
+			"fs.name != '.beholdfs' and "
 			"%d = (select count(*) from ( "
 				"select t.id from include t "
 				"join files_tags ft on ft.id_tag = t.id "
@@ -1060,7 +1057,7 @@ int beholddb_opendir(const char *realpath, const char *const *tags, void **handl
 				"select t.id from exclude t "
 				"join strong_tags st on st.id_tag = t.id "
 				"where st.id_file = f.id "
-			")))",
+			"))",
 		tagcount_p, 0);
 	(rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL));
 	sqlite3_free(sql);
