@@ -338,8 +338,10 @@ int beholdfs_read(const char *path, char *buf, size_t count, off_t offset,
 	     struct fuse_file_info *fi)
 {
 	int ret;
+	syslog(LOG_DEBUG, "beholdfs_read(path=%s...)", path);
 	if (-1 == (ret = pread(fi->fh, buf, count, offset)))
 		ret = -errno;
+	syslog(LOG_DEBUG, "beholdfs_read: ret=%d", ret);
 	return ret;
 }
 
@@ -355,8 +357,10 @@ int beholdfs_write(const char *path, const char *buf, size_t count, off_t offset
 		   struct fuse_file_info *fi)
 {
 	int ret;
+	syslog(LOG_DEBUG, "beholdfs_write(path=%s...)", path);
 	if (-1 == (ret = pwrite(fi->fh, buf, count, offset)))
 		ret = -errno;
+	syslog(LOG_DEBUG, "beholdfs_write: ret=%d", ret);
 	return ret;
 }
 
@@ -430,8 +434,10 @@ int beholdfs_flush(const char *path, struct fuse_file_info *fi)
 int beholdfs_release(const char *path, struct fuse_file_info *fi)
 {
 	int ret;
+	syslog(LOG_DEBUG, "beholdfs_release(path=%s...)", path);
 	if (-1 == (ret = close(fi->fh)))
 		ret = -errno;
+	syslog(LOG_DEBUG, "beholdfs_release: ret=%d", ret);
 	return ret;
 }
 
@@ -445,8 +451,10 @@ int beholdfs_release(const char *path, struct fuse_file_info *fi)
 int beholdfs_fsync(const char *path, int datasync, struct fuse_file_info *fi)
 {
 	int ret;
+	syslog(LOG_DEBUG, "beholdfs_fsync(path=%s...)", path);
 	if (-1 == (ret = datasync ? fdatasync(fi->fh) : fsync(fi->fh)))
 		ret = -errno;
+	syslog(LOG_DEBUG, "beholdfs_fsync: ret=%d", ret);
 	return ret;
 }
 
@@ -532,18 +540,16 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 {
 	int ret = -ENOENT;
 	const char *realpath, *const *tags;
+	void *handle;
 
 	syslog(LOG_DEBUG, "beholdfs_opendir(path=%s)", path);
-	if (!beholddb_get_file(path, &realpath, &tags))
+	if (!beholddb_get_file(path, &realpath, &tags) && !beholddb_opendir(realpath, tags, &handle)) // TODO: handle errors
 	{
 		ret = 0;
-		void *handle;
 		DIR *dir = opendir(realpath);
 		if (!dir)
 			ret = -errno; else
 		{
-			beholddb_opendir(realpath, tags, &handle); // TODO: handle errors
-
 			struct beholdfs_dir *fsdir = (struct beholdfs_dir*)malloc(sizeof(struct beholdfs_dir));
 
 			fsdir->dir = dir;
@@ -584,7 +590,9 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 	int ret = 0;
 
 	syslog(LOG_DEBUG, "beholdfs_readdir(path=%s, offset=%d)", path, (int)offset);
-	return beholddb_readdir(fsdir->handle, buffer, filler, offset);
+	ret = beholddb_readdir(fsdir->handle, buffer, filler, offset);
+	syslog(LOG_DEBUG, "beholdfs_readdir: ret=%d", ret);
+	return ret;
 }
 
 /** Release directory
@@ -599,6 +607,7 @@ int beholdfs_releasedir(const char *path, struct fuse_file_info *fi)
 	beholddb_closedir(fsdir->handle);
 	closedir(fsdir->dir);
 	free(fsdir);
+	syslog(LOG_DEBUG, "beholdfs_releasedir");
 	return 0;
 }
 
@@ -611,12 +620,14 @@ int beholdfs_releasedir(const char *path, struct fuse_file_info *fi)
  */
 int beholdfs_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
 {
+	syslog(LOG_DEBUG, "beholdfs_fsyncdir(path=%s)", path);
 	struct beholdfs_dir *fsdir = (struct beholdfs_dir*)(intptr_t)fi->fh;
 	int fd = dirfd(fsdir->dir);
 	int ret;
 
 	if (fd < 0 || (ret = datasync ? fdatasync(fd) : fsync(fd)))
 		ret = -errno;
+	syslog(LOG_DEBUG, "beholdfs_fsyncdir: ret=%d)", ret);
 	return ret;
 }
 
@@ -733,8 +744,10 @@ int beholdfs_ftruncate(const char *path, off_t length, struct fuse_file_info *fi
 {
 	int ret;
 
+	syslog(LOG_DEBUG, "beholdfs_ftruncate(path=%s)", path);
 	if ((ret = ftruncate(fi->fh, length)))
 		ret = -errno;
+	syslog(LOG_DEBUG, "beholdfs_ftruncate: ret=%d", ret);
 	return ret;
 }
 
@@ -754,8 +767,10 @@ int beholdfs_fgetattr(const char *path, struct stat *buf, struct fuse_file_info 
 {
 	int ret;
 
+	syslog(LOG_DEBUG, "beholdfs_fgetattr(path=%s)", path);
 	if ((ret = fstat(fi->fh, buf)))
 		ret = -errno;
+	syslog(LOG_DEBUG, "beholdfs_fgetattr: ret=%d", ret);
 	return ret;
 }
 
@@ -794,6 +809,8 @@ int beholdfs_fgetattr(const char *path, struct stat *buf, struct fuse_file_info 
 int beholdfs_lock(const char *path, struct fuse_file_info *fi, int cmd,
 	     struct flock *lock)
 {
+	syslog(LOG_DEBUG, "beholdfs_lock(path=%s)", path);
+	return 0;
 }
 
 /**
@@ -828,6 +845,8 @@ int beholdfs_utimens(const char *path, const struct timespec times[2])
  */
 int beholdfs_bmap(const char *path, size_t blocksize, uint64_t *idx)
 {
+	syslog(LOG_DEBUG, "beholdfs_bmap(path=%s)", path);
+	return 0;
 }
 
 /**
