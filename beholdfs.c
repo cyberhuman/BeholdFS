@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <attr/xattr.h>
+#include <dirent.h>
 #include <unistd.h>
 #include <stddef.h>
 #include <fcntl.h>
@@ -543,7 +544,7 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 	void *handle;
 
 	syslog(LOG_DEBUG, "beholdfs_opendir(path=%s)", path);
-	if (!beholddb_get_file(path, &realpath, &tags) && !beholddb_opendir(realpath, tags, &handle)) // TODO: handle errors
+	if (!beholddb_get_file(path, &realpath, &tags)) // TODO: handle errors
 	{
 		ret = 0;
 		DIR *dir = opendir(realpath);
@@ -551,9 +552,14 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 			ret = -errno; else
 		{
 			struct beholdfs_dir *fsdir = (struct beholdfs_dir*)malloc(sizeof(struct beholdfs_dir));
+			int len = offsetof(struct dirent, d_name) +
+				pathconf(realpath, _PC_NAME_MAX) + 1;
 
+			beholddb_opendir(realpath, tags, &handle);
 			fsdir->dir = dir;
 			fsdir->handle = handle;
+			fsdir->entry = (struct dirent*)malloc(len);
+			fsdir->result = NULL;
 			fi->fh = (intptr_t)fsdir;
 		}
 	}
@@ -586,13 +592,34 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset,
 		struct fuse_file_info *fi)
 {
-	struct beholdfs_dir *fsdir = (struct beholdfs_dir*)(intptr_t)fi->fh;
-	int ret = 0;
-
 	syslog(LOG_DEBUG, "beholdfs_readdir(path=%s, offset=%d)", path, (int)offset);
-	ret = beholddb_readdir(fsdir->handle, buffer, filler, offset);
-	syslog(LOG_DEBUG, "beholdfs_readdir: ret=%d", ret);
-	return ret;
+	struct beholdfs_dir *fsdir = (struct beholdfs_dir*)(intptr_t)fi->fh;
+	int fd = dirfd(fsdir->dir);
+	int ret;
+
+	while (1)
+	{
+		if (!fsdir->result)
+		{
+			while (!(ret = -readdir_r(fsdir->dir, fsdir->entry, &fsdir->result)) && fsdir->result &&
+				fsdir->handle && beholddb_readdir(fsdir->handle, fsdir->result->d_name));
+			syslog(LOG_DEBUG, "beholdfs_readdir: ret=%d, result=%p", ret, fsdir->result);
+			if (ret) // an error occurred
+				return ret;
+			if (!fsdir->result) // end of listing
+				return 0;
+		}
+		struct stat stat;
+		char *name = fsdir->result->d_name;
+		ret = fstatat(fd, name, &stat, AT_SYMLINK_NOFOLLOW);
+		if (filler(buffer, name, ret ? NULL : &stat, offset++))
+		{
+			syslog(LOG_DEBUG, "beholdfs_readdir: buffer is full, offset=%d", (int)offset);
+			return 0; // buffer is full
+		}
+		syslog(LOG_DEBUG, "beholdfs_readdir: added '%s'", fsdir->result->d_name);
+		fsdir->result = NULL;
+	}
 }
 
 /** Release directory
@@ -606,6 +633,7 @@ int beholdfs_releasedir(const char *path, struct fuse_file_info *fi)
 	syslog(LOG_DEBUG, "beholdfs_releasedir(path=%s)", path);
 	beholddb_closedir(fsdir->handle);
 	closedir(fsdir->dir);
+	free(fsdir->entry);
 	free(fsdir);
 	syslog(LOG_DEBUG, "beholdfs_releasedir");
 	return 0;
@@ -934,11 +962,13 @@ struct fuse_operations beholdfs_operations =
 int main(int argc, char **argv)
 {
 	int opt;
+	int debug = 0;
 
 	while (-1 != (opt = getopt(argc, argv, "o:")))
 	{
 		switch (opt)
 		{
+			break;
 		default:;
 		}
 	}
@@ -963,7 +993,8 @@ int main(int argc, char **argv)
 	state->rootdir = rootdir;
 	state->tagchar = '%';
 
-	//setlogmask(LOG_UPTO(LOG_NOTICE));
+	if (!debug)
+		setlogmask(LOG_UPTO(LOG_NOTICE));
 
 	optind = 0;
 	//struct fuse_args args = FUSE_ARGS_INIT(argc, argv);

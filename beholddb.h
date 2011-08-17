@@ -11,7 +11,8 @@ int beholddb_delete_file(const char *realpath);
 int beholddb_rename_file(const char *oldrealpath, const char *newrealpath, const char *const *tags);
 void beholddb_free_tags(const char *const *tags);
 int beholddb_opendir(const char *realpath, const char *const *tags, void **handle);
-int beholddb_readdir(void *handle, void *buffer, int (*filler)(void*, const char*, const struct stat*, off_t), int offset);
+int beholddb_readdir(void *handle, const char *name);
+//int beholddb_readdir(void *handle, void *buffer, int (*filler)(void*, const char*, const struct stat*, off_t), int offset);
 int beholddb_closedir(void *handle);
 
 

@@ -13,6 +13,8 @@ struct beholdfs_dir
 {
 	DIR *dir;
 	void *handle;
+	struct dirent *entry;
+	struct dirent *result;
 };
 
 #define BEHOLDFS_STATE ((struct beholdfs_state*)fuse_get_context()->private_data)
