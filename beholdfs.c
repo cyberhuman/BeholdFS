@@ -15,7 +15,7 @@
 #include <syslog.h>
 
 #include <fuse/fuse.h>
-//#include <fuse/fuse_opt.h>
+#include <fuse/fuse_opt.h>
 
 #include "beholdfs.h"
 #include "beholddb.h"
@@ -709,7 +709,7 @@ int beholdfs_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
 void *beholdfs_init(struct fuse_conn_info *conn)
 {
 	syslog(LOG_DEBUG, "beholdfs_init()");
-	struct beholdfs_state *state = BEHOLDFS_STATE;
+	beholdfs_state *state = BEHOLDFS_STATE;
 
 	fchdir(state->rootdir);
 	close(state->rootdir);
@@ -729,7 +729,7 @@ void *beholdfs_init(struct fuse_conn_info *conn)
 void beholdfs_destroy(void *private_data)
 {
 	syslog(LOG_DEBUG, "beholdfs_destroy()");
-	struct beholdfs_state *state = (struct beholdfs_state*)private_data;
+	beholdfs_state *state = (beholdfs_state*)private_data;
 
 	free(state);
 }
@@ -996,47 +996,65 @@ struct fuse_operations beholdfs_operations =
 	.flag_nullpath_ok = 1,
 };
 
+static struct fuse_opt beholdfs_opts[] =
+{
+	BEHOLDFS_OPT("debug=%i",	loglevel,	0),
+	BEHOLDFS_OPT("char=%c",		tagchar,	0),
+	//FUSE_OPT("--help",		BEHOLDFS_KEY_HELP),
+	//FUSE_OPT("-h",		BEHOLDFS_KEY_HELP),
+	//FUSE_OPT("--version",		BEHOLDFS_KEY_VERSION),
+	//FUSE_OPT("-V",		BEHOLDFS_KEY_VERSION),
+	FUSE_OPT_END
+};
+
+static int beholdfs_opt_proc(void *data, const char *arg, int key, struct fuse_args *outargs)
+{
+	beholdfs_config *config = (beholdfs_config*)data;
+
+	switch (key)
+	{
+	case FUSE_OPT_KEY_NONOPT:
+		if (config->rootdir)
+			break;
+		config->rootdir = arg;
+		return 0;
+	}
+	return 1;
+}
+
 int main(int argc, char **argv)
 {
-	int opt;
-	int debug = 0;
+	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+	beholdfs_config config;
 
-	while (-1 != (opt = getopt(argc, argv, "o:")))
-	{
-		switch (opt)
-		{
-			break;
-		default:;
-		}
-	}
-	if (optind != argc - 2)
+	memset(&config, 0, sizeof(config));
+	config.tagchar = BEHOLDFS_TAG_CHAR;
+	fuse_opt_parse(&args, &config, beholdfs_opts, beholdfs_opt_proc);
+
+	if (!config.rootdir)
 	{
 		fprintf(stderr, "Usage: beholdfs -o[options] <fsroot> <mountpoint>\n");
 		exit(1);
 	}
 
 	int rootdir;
-	if (-1 == (rootdir = open(argv[optind], O_RDONLY)))
+
+	if (-1 == (rootdir = open(config.rootdir, O_RDONLY)))
 	{
 		perror("Cannot mount specified directory");
 		exit(2);
 	}
 
-	for (int i = optind + 1; i < argc; ++i)
-		argv[i - 1] = argv[i];
-	--argc;
+	setlogmask(LOG_UPTO(config.loglevel <= LOG_DEBUG ? config.loglevel : LOG_DEBUG));
 
-	struct beholdfs_state *state = (struct beholdfs_state*)malloc(sizeof(struct beholdfs_state));
+	beholdfs_state *state = (beholdfs_state*)malloc(sizeof(beholdfs_state));
+
 	state->rootdir = rootdir;
-	state->tagchar = '%';
+	state->tagchar = config.tagchar;
 
-	if (!debug)
-		setlogmask(LOG_UPTO(LOG_NOTICE));
+	int ret = fuse_main(args.argc, args.argv, &beholdfs_operations, state);
 
-	optind = 0;
-	//struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-	int ret = fuse_main(argc, argv, &beholdfs_operations, state);
-	//fuse_opt_free_args(&args);
+	fuse_opt_free_args(&args);
 	return ret;
 }
 
