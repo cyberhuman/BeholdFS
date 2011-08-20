@@ -46,7 +46,12 @@ Directories are excluded from the %-tag listing if all of the files under the di
 
 This is still work in progress. Do not expect much.
 
-Known problems:
-- tags are not shown in the directory structure (for less frequently used tags, in '%' subdirectory)
+
+KNOWN PROBLEMS:
+- tags are not shown in the directory structure (but tag list is accessible under '%' subdirectory)
 - metadata (database file) is never deleted, so 'empty' directories cannot be removed
+
+TODO:
+- introduce explicit tags; files marked with such explicit tag won't show unless the tag is specified explicitly
+- provide better tag list (filtering out combinations resulting in empty file set)
 

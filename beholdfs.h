@@ -9,13 +9,15 @@ struct beholdfs_state
 	char tagchar;
 };
 
-struct beholdfs_dir
+typedef struct beholdfs_dir
 {
+	int stage;
 	DIR *dir;
 	void *handle;
 	struct dirent *entry;
 	struct dirent *result;
-};
+	const char *dbresult;
+} beholdfs_dir;
 
 #define BEHOLDFS_STATE ((struct beholdfs_state*)fuse_get_context()->private_data)
 
