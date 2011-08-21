@@ -577,11 +577,14 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 				fsdir->entry = NULL;
 			} else
 			{
-				fsdir->stage = 1;
+				fsdir->stage = BEHOLDFS_STATE->tagshow ? 2 : 1;
 				fsdir->entry = (struct dirent*)malloc(len);
 			}
 			fsdir->result = NULL;
 			fsdir->dbresult = NULL;
+
+			syslog(LOG_DEBUG, "beholdfs_opendir: handle=%p", handle);
+
 			fi->fh = (intptr_t)fsdir;
 		}
 	}
@@ -623,6 +626,25 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 
 	if (fsdir->stage)
 	{
+		if (2 == fsdir->stage) // show tag character
+		{
+			--fsdir->stage;
+
+			if (fstat(fd, &stat))
+			{
+				ret = -errno;
+				return ret;
+			}
+
+			const char LISTING_DIR[] = { BEHOLDFS_STATE->tagchar, 0 };
+
+			if (filler(buffer, LISTING_DIR, &stat, ++offset))
+			{
+				syslog(LOG_ERR, "beholdfs_readdir: could not add listing dir");
+				return 0; // buffer is full (should not happen)
+			}
+		}
+
 		// stage 1
 		while (1)
 		{
@@ -642,16 +664,23 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 			if (filler(buffer, name, ret ? NULL : &stat, ++offset))
 			{
 				syslog(LOG_DEBUG, "beholdfs_readdir: buffer is full, offset=%d", (int)offset);
-				break; // buffer is full
+				return 0; // buffer is full
 			}
 			syslog(LOG_DEBUG, "beholdfs_readdir: added '%s'", name);
 			fsdir->result = NULL;
 		}
 	} else
 	{
+		if (!fsdir->handle) // temporary workaround
+		{
+			syslog(LOG_ERR, "beholdfs_readdir: trying to list tags in directory without metadata");
+			return -ENOENT;
+		}
+
 		if (fstat(fd, &stat))
 		{
 			ret = -errno;
+			syslog(LOG_ERR, "beholdfs_readdir: tag listing: stat() error (%d)", ret);
 			return ret;
 		}
 		ret = 0;
@@ -669,7 +698,7 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 			if (filler(buffer, fsdir->dbresult, &stat, ++offset))
 			{
 				syslog(LOG_DEBUG, "beholdfs_readdir: buffer is full, offset=%d", (int)offset);
-				break; // buffer is full
+				return 0; // buffer is full
 			}
 			syslog(LOG_DEBUG, "beholdfs_readdir: added '%s'", fsdir->dbresult);
 			fsdir->dbresult = NULL;
@@ -728,13 +757,15 @@ int beholdfs_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
 void *beholdfs_init(struct fuse_conn_info *conn)
 {
 	syslog(LOG_DEBUG, "beholdfs_init()");
+
 	beholdfs_state *state = BEHOLDFS_STATE;
+	extern char beholddb_tagchar;
+
+	beholddb_tagchar = state->tagchar;
 
 	fchdir(state->rootdir);
 	close(state->rootdir);
 
-	extern char beholddb_tagchar;
-	beholddb_tagchar = state->tagchar;
 	return state;
 }
 
@@ -1019,6 +1050,8 @@ static struct fuse_opt beholdfs_opts[] =
 {
 	BEHOLDFS_OPT("debug=%i",	loglevel,	0),
 	BEHOLDFS_OPT("char=%c",		tagchar,	0),
+	BEHOLDFS_OPT("list",		tagshow,	1),
+	BEHOLDFS_OPT("nolist",		tagshow,	0),
 	//FUSE_OPT("--help",		BEHOLDFS_KEY_HELP),
 	//FUSE_OPT("-h",		BEHOLDFS_KEY_HELP),
 	//FUSE_OPT("--version",		BEHOLDFS_KEY_VERSION),
@@ -1048,6 +1081,7 @@ int main(int argc, char **argv)
 
 	memset(&config, 0, sizeof(config));
 	config.tagchar = BEHOLDFS_TAG_CHAR;
+	config.tagshow = BEHOLDFS_TAG_SHOW;
 	fuse_opt_parse(&args, &config, beholdfs_opts, beholdfs_opt_proc);
 
 	if (!config.rootdir)
@@ -1070,6 +1104,7 @@ int main(int argc, char **argv)
 
 	state->rootdir = rootdir;
 	state->tagchar = config.tagchar;
+	state->tagshow = config.tagshow;
 
 	int ret = fuse_main(args.argc, args.argv, &beholdfs_operations, state);
 

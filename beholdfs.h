@@ -27,12 +27,14 @@ typedef struct beholdfs_config
 	const char *rootdir;
 	int loglevel;
 	char tagchar;
+	int tagshow;
 } beholdfs_config;
 
 typedef struct beholdfs_state
 {
 	int rootdir;
 	char tagchar;
+	char tagshow;
 } beholdfs_state;
 
 typedef struct beholdfs_dir
@@ -49,6 +51,7 @@ typedef struct beholdfs_dir
 #define BEHOLDFS_OPT(t, p, v) { t, offsetof(beholdfs_config, p), v }
 
 #define BEHOLDFS_TAG_CHAR	'%'
+#define BEHOLDFS_TAG_SHOW	1
 
 #endif // __BEHOLDFS_H__
 

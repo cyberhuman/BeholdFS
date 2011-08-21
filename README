@@ -48,10 +48,9 @@ This is still work in progress. Do not expect much.
 
 
 KNOWN PROBLEMS:
-- tags are not shown in the directory structure (but tag list is accessible under '%' subdirectory)
 - metadata (database file) is never deleted, so 'empty' directories cannot be removed
 
 TODO:
 - introduce explicit tags; files marked with such explicit tag won't show unless the tag is specified explicitly
-- provide better tag list (filtering out combinations resulting in empty file set)
+- introduce hidden tags; hidden tags are not visible in tag listing
 

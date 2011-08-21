@@ -193,9 +193,10 @@ static int beholddb_init(sqlite3 *db)
 static int beholddb_create_tables(sqlite3 *db)
 {
 	// ignore return value, as there is 'if not exists' cannot be used with virtual table
-	beholddb_exec(db,
-		"create virtual table filesystem "
-		"using sqlitefs;");
+	//beholddb_exec(db,
+	//	"drop table filesystem;");
+	//	"create virtual table filesystem "
+	//	"using sqlitefs;");
 	return beholddb_exec(db,
 		"create table if not exists files "
 		"("
@@ -532,20 +533,33 @@ static const char *BEHOLDDB_DML_LOCATE =
 	"left outer join files f on f.name = fs.name "
 	"where "
 		"( select count(*) from include t "
-			"join files_tags ft on ft.id_tag = t.id "
-			"where ft.id_file = f.id "
-		") = ( select count(*) from include ) and "
-		"( select count(*) from exclude t "
-			"join strong_tags st on st.id_tag = t.id "
-			"where st.id_file = f.id "
-		") = 0";
+		"join files_tags ft on ft.id_tag = t.id "
+		"where ft.id_file = f.id ) = "
+		"( select count(*) from include t ) and "
 
-static const char *BEHOLDDB_DML_LISTING =
-	"select t.name from tags t "
-	"join files_tags ft on ft.id_tag = t.id "
+		"not exists "
+		"( select * from exclude t "
+		"join strong_tags st on st.id_tag = t.id "
+		"where st.id_file = f.id )";
+
+static const char *BEHOLDDB_DML_TAG_LISTING =
+	"select distinct t.name "
+	"from files f "
+	"join files_tags ft on ft.id_file = f.id "
+	"join tags t on t.id = ft.id_tag "
 	"where "
-		"t.id not in ( select id from include ) and "
-		"t.id not in ( select id from exclude )";
+		"( select count(*) from include t "
+		"join files_tags ft on ft.id_tag = t.id "
+		"where ft.id_file = f.id ) = "
+		"( select count(*) from include t ) and "
+
+		"not exists "
+		"( select * from exclude t "
+		"join strong_tags st on st.id_tag = t.id "
+		"where st.id_file = f.id ) "
+
+	"except select name from include "
+	"except select name from exclude";
 
 static int beholddb_readdir_worker(sqlite3_stmt *stmt, const char *name);
 
@@ -958,7 +972,7 @@ int beholddb_opendir(const beholddb_path *bpath, void **phandle)
 
 	(rc = beholddb_set_files_tags(db, &bpath->include, &bpath->exclude)) ||
 	(rc = sqlite3_prepare_v2(db,
-		bpath->listing ? BEHOLDDB_DML_LISTING : BEHOLDDB_DML_LOCATE,
+		bpath->listing ? BEHOLDDB_DML_TAG_LISTING : BEHOLDDB_DML_LOCATE,
 		-1, &stmt, NULL));
 	if (rc)
 		sqlite3_close(db); else
