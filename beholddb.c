@@ -36,6 +36,7 @@ struct beholddb_dir
 typedef struct beholddb_dir beholddb_dir;
 
 char beholddb_tagchar;
+int beholddb_new_locate;
 static const char BEHOLDDB_NAME[] = ".beholdfs";
 
 
@@ -529,35 +530,71 @@ static int beholddb_get_file_tags(sqlite3 *db, const char *file,
 }
 
 static const char *BEHOLDDB_DML_LOCATE =
-	"select 1 from ( select ?1 name ) fs "
+	"select 1 from ( select ? name ) fs "
 	"left outer join files f on f.name = fs.name "
-	"where "
-		"( select count(*) from include t "
+	"where not exists ( "
+		"select t.id from include t "
+		"except "
+		"select t.id from include t "
 		"join files_tags ft on ft.id_tag = t.id "
-		"where ft.id_file = f.id ) = "
-		"( select count(*) from include t ) and "
+		"where ft.id_file = f.id ) "
+	"and not exists ( "
+		"select t.id from exclude t "
+		"join files_tags ft on ft.id_tag = t.id "
+		"join files f on f.id = ft.id_file "
+		"where ft.id_file = f.id and f.type = 0 ) "
+	"and not exists ( "
+		"select t.id from exclude t "
+		"join dirs_tags dt on dt.id_tag = t.id "
+		"where dt.id_file = f.id ) ";
 
-		"not exists "
-		"( select * from exclude t "
-		"join strong_tags st on st.id_tag = t.id "
-		"where st.id_file = f.id )";
+static const char *BEHOLDDB_DDL_FAST_LOCATE_START =
+	"create temp table fast_files ( id integer primary key, name text unique );"
+	"insert into fast_files "
+	"select f.id, f.name from files f "
+	"where not exists ( "
+		"select t.id from include t "
+		"except "
+		"select t.id from include t "
+		"join files_tags ft on ft.id_tag = t.id "
+		"where ft.id_file = f.id ) "
+	"and not exists ( "
+		"select t.id from exclude t "
+		"join files_tags ft on ft.id_tag = t.id "
+		"join files f on f.id = ft.id_file "
+		"where ft.id_file = f.id and f.type = 0 ) "
+	"and not exists ( "
+		"select t.id from exclude t "
+		"join dirs_tags dt on dt.id_tag = t.id "
+		"where dt.id_file = f.id ) ";
+
+static const char *BEHOLDDB_DML_FAST_LOCATE =
+	"select 1 from fast_files f "
+	"where f.name = ?";
+
+static const char *BEHOLDDB_DDL_FAST_LOCATE_STOP =
+	"drop table fast_files;";
 
 static const char *BEHOLDDB_DML_TAG_LISTING =
 	"select distinct t.name "
 	"from files f "
 	"join files_tags ft on ft.id_file = f.id "
 	"join tags t on t.id = ft.id_tag "
-	"where "
-		"( select count(*) from include t "
+	"where not exists ( "
+		"select t.id from include t "
+		"except "
+		"select t.id from include t "
 		"join files_tags ft on ft.id_tag = t.id "
-		"where ft.id_file = f.id ) = "
-		"( select count(*) from include t ) and "
-
-		"not exists "
-		"( select * from exclude t "
-		"join strong_tags st on st.id_tag = t.id "
-		"where st.id_file = f.id ) "
-
+		"where ft.id_file = f.id ) "
+	"and not exists ( "
+		"select t.id from exclude t "
+		"join files_tags ft on ft.id_tag = t.id "
+		"join files ff on ff.id = ft.id_file "
+		"where ft.id_file = f.id and ff.type = 0 ) "
+	"and not exists ( "
+		"select t.id from exclude t "
+		"join dirs_tags dt on dt.id_tag = t.id "
+		"where dt.id_file = f.id ) "
 	"except select name from include "
 	"except select name from exclude";
 
@@ -970,10 +1007,19 @@ int beholddb_opendir(const beholddb_path *bpath, void **phandle)
 		return BEHOLDDB_ERROR;
 	}
 
-	(rc = beholddb_set_files_tags(db, &bpath->include, &bpath->exclude)) ||
-	(rc = sqlite3_prepare_v2(db,
-		bpath->listing ? BEHOLDDB_DML_TAG_LISTING : BEHOLDDB_DML_LOCATE,
-		-1, &stmt, NULL));
+	(rc = beholddb_set_files_tags(db, &bpath->include, &bpath->exclude));
+	if (beholddb_new_locate && !bpath->listing)
+	{
+		rc ||
+		(rc = sqlite3_exec(db, BEHOLDDB_DDL_FAST_LOCATE_START, NULL, NULL, NULL)) ||
+		(rc = sqlite3_prepare_v2(db, BEHOLDDB_DML_FAST_LOCATE, -1, &stmt, NULL));
+	} else
+	{
+		rc ||
+		(rc = sqlite3_prepare_v2(db,
+			bpath->listing ? BEHOLDDB_DML_TAG_LISTING : BEHOLDDB_DML_LOCATE,
+			-1, &stmt, NULL));
+	}
 	if (rc)
 		sqlite3_close(db); else
 	{
@@ -1065,6 +1111,11 @@ int beholddb_closedir(void *handle)
 		return BEHOLDDB_OK;
 
 	beholddb_dir *dir = (beholddb_dir*)handle;
+
+	if (beholddb_new_locate)
+	{
+		sqlite3_exec(dir->db, BEHOLDDB_DDL_FAST_LOCATE_STOP, NULL, NULL, NULL);
+	}
 
 	sqlite3_finalize(dir->stmt);
 	sqlite3_close(dir->db);

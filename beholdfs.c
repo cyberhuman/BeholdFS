@@ -760,8 +760,10 @@ void *beholdfs_init(struct fuse_conn_info *conn)
 
 	beholdfs_state *state = BEHOLDFS_STATE;
 	extern char beholddb_tagchar;
+	extern int beholddb_new_locate;
 
 	beholddb_tagchar = state->tagchar;
+	beholddb_new_locate = state->new_locate;
 
 	fchdir(state->rootdir);
 	close(state->rootdir);
@@ -1052,6 +1054,7 @@ static struct fuse_opt beholdfs_opts[] =
 	BEHOLDFS_OPT("char=%c",		tagchar,	0),
 	BEHOLDFS_OPT("list",		tagshow,	1),
 	BEHOLDFS_OPT("nolist",		tagshow,	0),
+	BEHOLDFS_OPT("new_locate",	new_locate,	1),
 	//FUSE_OPT("--help",		BEHOLDFS_KEY_HELP),
 	//FUSE_OPT("-h",		BEHOLDFS_KEY_HELP),
 	//FUSE_OPT("--version",		BEHOLDFS_KEY_VERSION),
@@ -1105,6 +1108,7 @@ int main(int argc, char **argv)
 	state->rootdir = rootdir;
 	state->tagchar = config.tagchar;
 	state->tagshow = config.tagshow;
+	state->new_locate = config.new_locate;
 
 	int ret = fuse_main(args.argc, args.argv, &beholdfs_operations, state);
 

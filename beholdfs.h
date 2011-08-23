@@ -28,13 +28,16 @@ typedef struct beholdfs_config
 	int loglevel;
 	char tagchar;
 	int tagshow;
+	int new_locate;
 } beholdfs_config;
 
 typedef struct beholdfs_state
 {
 	int rootdir;
+
 	char tagchar;
 	char tagshow;
+	int new_locate;
 } beholdfs_state;
 
 typedef struct beholdfs_dir
