@@ -538,15 +538,16 @@ static const char *BEHOLDDB_DML_LOCATE =
 		"select t.id from include t "
 		"join files_tags ft on ft.id_tag = t.id "
 		"where ft.id_file = f.id ) "
-	"and not exists ( "
+	"and case when f.type = 0 "
+	"then not exists ( "
 		"select t.id from exclude t "
 		"join files_tags ft on ft.id_tag = t.id "
-		"join files f on f.id = ft.id_file "
-		"where ft.id_file = f.id and f.type = 0 ) "
-	"and not exists ( "
+		"where ft.id_file = f.id ) "
+	"else not exists ( "
 		"select t.id from exclude t "
 		"join dirs_tags dt on dt.id_tag = t.id "
-		"where dt.id_file = f.id ) ";
+		"where dt.id_file = f.id ) "
+	"end ";
 
 static const char *BEHOLDDB_DDL_FAST_LOCATE_START =
 	"create temp table fast_files ( id integer primary key, name text unique );"
@@ -558,15 +559,16 @@ static const char *BEHOLDDB_DDL_FAST_LOCATE_START =
 		"select t.id from include t "
 		"join files_tags ft on ft.id_tag = t.id "
 		"where ft.id_file = f.id ) "
-	"and not exists ( "
+	"and case when f.type = 0 "
+	"then not exists ( "
 		"select t.id from exclude t "
 		"join files_tags ft on ft.id_tag = t.id "
-		"join files f on f.id = ft.id_file "
-		"where ft.id_file = f.id and f.type = 0 ) "
-	"and not exists ( "
+		"where ft.id_file = f.id ) "
+	"else not exists ( "
 		"select t.id from exclude t "
 		"join dirs_tags dt on dt.id_tag = t.id "
-		"where dt.id_file = f.id ) ";
+		"where dt.id_file = f.id ) "
+	"end ";
 
 static const char *BEHOLDDB_DML_FAST_LOCATE =
 	"select 1 from fast_files f "
@@ -576,27 +578,32 @@ static const char *BEHOLDDB_DDL_FAST_LOCATE_STOP =
 	"drop table fast_files;";
 
 static const char *BEHOLDDB_DML_TAG_LISTING =
-	"select distinct t.name "
+	"select t.name from ( "
+	"select distinct ft.id_tag id "
 	"from files f "
 	"join files_tags ft on ft.id_file = f.id "
-	"join tags t on t.id = ft.id_tag "
 	"where not exists ( "
 		"select t.id from include t "
 		"except "
 		"select t.id from include t "
 		"join files_tags ft on ft.id_tag = t.id "
 		"where ft.id_file = f.id ) "
-	"and not exists ( "
+	"and case when f.type = 0 "
+	"then not exists ( "
 		"select t.id from exclude t "
 		"join files_tags ft on ft.id_tag = t.id "
-		"join files ff on ff.id = ft.id_file "
-		"where ft.id_file = f.id and ff.type = 0 ) "
-	"and not exists ( "
+		"where ft.id_file = f.id ) "
+	"else not exists ( "
 		"select t.id from exclude t "
 		"join dirs_tags dt on dt.id_tag = t.id "
 		"where dt.id_file = f.id ) "
-	"except select name from include "
-	"except select name from exclude";
+	"end "
+	"except select id from include "
+	"except select id from exclude ) tt "
+	"join tags t on t.id = tt.id "
+	"join files_tags ft on ft.id_tag = tt.id "
+	"group by tt.id "
+	"order by count(*) desc ";
 
 static int beholddb_readdir_worker(sqlite3_stmt *stmt, const char *name);
 
