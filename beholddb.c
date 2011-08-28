@@ -26,6 +26,7 @@
 
 #include "beholddb.h"
 #include "fs.h"
+#include "schema.h"
 
 struct beholddb_dir
 {
@@ -193,11 +194,6 @@ static int beholddb_init(sqlite3 *db)
 
 static int beholddb_create_tables(sqlite3 *db)
 {
-	// ignore return value, as there is 'if not exists' cannot be used with virtual table
-	//beholddb_exec(db,
-	//	"drop table filesystem;");
-	//	"create virtual table filesystem "
-	//	"using sqlitefs;");
 	return beholddb_exec(db,
 		"create table if not exists files "
 		"("
@@ -528,82 +524,6 @@ static int beholddb_get_file_tags(sqlite3 *db, const char *file,
 
 	return SQLITE_OK; // TODO: handle errors
 }
-
-static const char *BEHOLDDB_DML_LOCATE =
-	"select 1 from ( select ? name ) fs "
-	"left outer join files f on f.name = fs.name "
-	"where not exists ( "
-		"select t.id from include t "
-		"except "
-		"select t.id from include t "
-		"join files_tags ft on ft.id_tag = t.id "
-		"where ft.id_file = f.id ) "
-	"and case when f.type = 0 "
-	"then not exists ( "
-		"select t.id from exclude t "
-		"join files_tags ft on ft.id_tag = t.id "
-		"where ft.id_file = f.id ) "
-	"else not exists ( "
-		"select t.id from exclude t "
-		"join dirs_tags dt on dt.id_tag = t.id "
-		"where dt.id_file = f.id ) "
-	"end ";
-
-static const char *BEHOLDDB_DDL_FAST_LOCATE_START =
-	"create temp table fast_files ( id integer primary key, name text unique );"
-	"insert into fast_files "
-	"select f.id, f.name from files f "
-	"where not exists ( "
-		"select t.id from include t "
-		"except "
-		"select t.id from include t "
-		"join files_tags ft on ft.id_tag = t.id "
-		"where ft.id_file = f.id ) "
-	"and case when f.type = 0 "
-	"then not exists ( "
-		"select t.id from exclude t "
-		"join files_tags ft on ft.id_tag = t.id "
-		"where ft.id_file = f.id ) "
-	"else not exists ( "
-		"select t.id from exclude t "
-		"join dirs_tags dt on dt.id_tag = t.id "
-		"where dt.id_file = f.id ) "
-	"end ";
-
-static const char *BEHOLDDB_DML_FAST_LOCATE =
-	"select 1 from fast_files f "
-	"where f.name = ?";
-
-static const char *BEHOLDDB_DDL_FAST_LOCATE_STOP =
-	"drop table fast_files;";
-
-static const char *BEHOLDDB_DML_TAG_LISTING =
-	"select t.name from ( "
-	"select distinct ft.id_tag id "
-	"from files f "
-	"join files_tags ft on ft.id_file = f.id "
-	"where not exists ( "
-		"select t.id from include t "
-		"except "
-		"select t.id from include t "
-		"join files_tags ft on ft.id_tag = t.id "
-		"where ft.id_file = f.id ) "
-	"and case when f.type = 0 "
-	"then not exists ( "
-		"select t.id from exclude t "
-		"join files_tags ft on ft.id_tag = t.id "
-		"where ft.id_file = f.id ) "
-	"else not exists ( "
-		"select t.id from exclude t "
-		"join dirs_tags dt on dt.id_tag = t.id "
-		"where dt.id_file = f.id ) "
-	"end "
-	"except select id from include "
-	"except select id from exclude ) tt "
-	"join tags t on t.id = tt.id "
-	"join files_tags ft on ft.id_tag = tt.id "
-	"group by tt.id "
-	"order by count(*) desc ";
 
 static int beholddb_readdir_worker(sqlite3_stmt *stmt, const char *name);
 
