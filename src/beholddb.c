@@ -174,7 +174,7 @@ static int beholddb_get_name(const beholddb_path *bpath, char **pdb_name)
 	return BEHOLDDB_OK;
 }
 
-static int beholddb_exec(sqlite3 *db, const char *sql)
+int beholddb_exec(sqlite3 *db, const char *sql)
 {
 	char *err;
 	int rc = sqlite3_exec(db, sql, NULL, NULL, &err);

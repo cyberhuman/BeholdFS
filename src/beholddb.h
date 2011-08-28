@@ -71,5 +71,7 @@ int beholddb_readdir(void *handle, const char *name);
 int beholddb_listdir(void *handle, const char **pname);
 int beholddb_closedir(void *handle);
 
+int beholddb_exec(sqlite3 *db, const char *sql);
+
 #endif // __BEHOLDDB_H__
 

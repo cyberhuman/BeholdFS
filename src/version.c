@@ -24,10 +24,11 @@
 #include <syslog.h>
 
 #include "version.h"
+#include "common.h"
 #include "beholddb.h"
 
-static const int BEHOLDDB_VERSION_MAJOR = 1;
-static const int BEHOLDDB_VERSION_MINOR = 0;
+#define BEHOLDDB_VERSION_MAJOR	1
+#define BEHOLDDB_VERSION_MINOR	0
 
 static int beholddb_decode_version(const char *version, int *pmajor, int *pminor)
 {

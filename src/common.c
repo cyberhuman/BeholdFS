@@ -24,6 +24,7 @@
 #include <sqlite3.h>
 #include <syslog.h>
 
+#include "beholddb.h"
 #include "common.h"
 
 const char *beholddb_column_text(sqlite3_stmt *stmt, int column)
@@ -92,7 +93,7 @@ int beholddb_set_fparam(sqlite3 *db, const char *param, const char *format, ...)
 
 	va_start(args, format);
 	rc = beholddb_set_vfparam(db, param, format, args);
-	va_end(args, format);
+	va_end(args);
 	return rc;
 }
 
