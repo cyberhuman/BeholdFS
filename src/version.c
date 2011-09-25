@@ -34,7 +34,8 @@ static int beholddb_decode_version(const char *version, int *pmajor, int *pminor
 {
 	if (!version)
 	{
-		*pmajor = *pminor = 0;
+		*pmajor = -1;
+		*pminor = 0;
 		return BEHOLDDB_OK;
 	}
 	if (2 == sscanf(version, "%d.%d", pmajor, pminor))
@@ -42,17 +43,9 @@ static int beholddb_decode_version(const char *version, int *pmajor, int *pminor
 	return BEHOLDDB_ERROR;
 }
 
-int beholddb_init_version(sqlite3 *db)
+int version_init(sqlite3 *db)
 {
 	int rc;
-
-	beholddb_exec(db,
-		"create table if not exists config "
-		"( "
-			"id integer primary key, "
-			"param text unique on conflict replace, "
-			"value text "
-		") ");
 
 	const char *version;
 	int major, minor;
@@ -69,14 +62,18 @@ int beholddb_init_version(sqlite3 *db)
 	if (BEHOLDDB_VERSION_MAJOR < major)
 	{
 		// metadata format is too new
+		syslog(LOG_ERR, "Metadata format is too new");
 		return BEHOLDDB_ERROR;
 	}
 
 	if (BEHOLDDB_VERSION_MAJOR == major && BEHOLDDB_VERSION_MINOR < minor)
 	{
 		// notice: database version is newer
+		syslog(LOG_NOTICE, "Metadata format is newer than the current");
 	} else
 	{
+		syslog(LOG_INFO, "Set version to %d.%d",
+			BEHOLDDB_VERSION_MAJOR, BEHOLDDB_VERSION_MINOR);
 		beholddb_set_fparam(db, "version", "%d.%d",
 			BEHOLDDB_VERSION_MAJOR, BEHOLDDB_VERSION_MINOR);
 	}
@@ -85,7 +82,7 @@ int beholddb_init_version(sqlite3 *db)
 	switch (major)
 	{
 	case 0:
-		// database is just created, nothing to do
+		;
 	case BEHOLDDB_VERSION_MAJOR:
 		// database version currently supported, nothing to do
 		break;

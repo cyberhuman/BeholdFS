@@ -17,6 +17,9 @@
  along with BeholdFS.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <sqlite3.h>
+
+#include "beholddb.h"
 #include "schema.h"
 
 const char *BEHOLDDB_DML_LOCATE =
@@ -69,8 +72,7 @@ const char *BEHOLDDB_DDL_FAST_LOCATE_STOP =
 
 const char *BEHOLDDB_DML_TAG_LISTING =
 	"select t.name from ( "
-	"select distinct ft.id_tag id "
-	"from files f "
+	"select distinct ft.id_tag id from files f "
 	"join files_tags ft on ft.id_file = f.id "
 	"where not exists ( "
 		"select t.id from include t "
@@ -95,4 +97,19 @@ const char *BEHOLDDB_DML_TAG_LISTING =
 	"group by tt.id "
 	"order by count(*) desc ";
 
+const char *BEHOLDDB_DDL_CREATE_CONFIG =
+	"create table if not exists config "
+	"( "
+		"id integer primary key, "
+		"param text unique on conflict replace, "
+		"value text "
+	") ";
+
+int schema_version_init(sqlite3 *db)
+{
+	int rc = BEHOLDDB_OK;
+
+	beholddb_exec(db, BEHOLDDB_DDL_CREATE_CONFIG);
+	return rc;
+}
 
