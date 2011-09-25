@@ -1,4 +1,5 @@
 .*.swp
 .*.swo
 beholdfs
-
+autom4te.cache
+*.so
