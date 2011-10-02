@@ -23,9 +23,12 @@
 #include <sqlite3.h>
 //#define BEHOLDDB_PARSE_INVERT 1
 
-#define BEHOLDDB_OK		0
-#define BEHOLDDB_ERROR		-1
-#define BEHOLDDB_FILTER		-100
+#define BEHOLDDB_OK         0
+#define BEHOLDDB_DONE       1
+#define BEHOLDDB_HIDDEN     2
+#define BEHOLDDB_ERROR     -1
+#define BEHOLDDB_NOTFOUND  -2
+//#define BEHOLDDB_FILTER  -100
 
 typedef struct beholddb_tag_list_item
 {
@@ -49,6 +52,7 @@ typedef struct beholddb_path
 	const char *realpath;
 	const char *basename;
 
+	beholddb_tag_list path;
 	union
 	{
 		beholddb_tag_list_set;

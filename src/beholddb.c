@@ -28,6 +28,7 @@
 #include "fs.h"
 #include "schema.h"
 
+/*
 struct beholddb_dir
 {
 	sqlite3 *db;
@@ -35,11 +36,21 @@ struct beholddb_dir
 };
 
 typedef struct beholddb_dir beholddb_dir;
+*/
 
 char beholddb_tagchar;
 int beholddb_new_locate;
-static const char BEHOLDDB_NAME[] = ".beholdfs";
+static const char BEHOLDDB_NAME[] = ".beholddb";
 
+static char *strrdup(const char *begin, const char *end)
+{
+  int len = end - begin;
+  char *str = (char*)malloc(1 + len);
+
+  memcpy(str, begin, len);
+  str[len] = 0;
+  return str;
+}
 
 static void beholddb_insert_tag(beholddb_tag_list_item **phead, const char *name)
 {
@@ -55,6 +66,15 @@ static void beholddb_delete_tag(beholddb_tag_list_item **pitem)
 	*pitem = save->next;
 	free((char*)save->name);
 	free(save);
+}
+
+static int beholddb_count_tags(beholddb_tag_list_item *head)
+{
+  int count = 0;
+
+  for (; head; head = head->next)
+    ++count;
+  return count;
 }
 
 static void beholddb_free_tag_list(beholddb_tag_list *list)
@@ -73,7 +93,7 @@ int beholddb_parse_path(const char *path, beholddb_path **pbpath)
 
 	bpath->realpath = pathptr;
 	bpath->basename = NULL;
-	bpath->include.head = bpath->exclude.head = NULL;
+	bpath->path.head = bpath->include.head = bpath->exclude.head = NULL;
 	bpath->listing = 0;
 
 	*pathptr++ = '.';
@@ -91,10 +111,13 @@ int beholddb_parse_path(const char *path, beholddb_path **pbpath)
 		default:
 			if (beholddb_tagchar != *path)
 			{
+				const char *comp = path;
+
 				*pathptr++ = '/';
 				bpath->basename = pathptr;
 				while (*path && '/' != *path)
 					*pathptr++ = *path++;
+				beholddb_insert_tag(&bpath->path, strrdup(comp, path));
 			} else
 			do
 			{
@@ -121,11 +144,7 @@ int beholddb_parse_path(const char *path, beholddb_path **pbpath)
 					++path;
 
 				// add new tag to the list
-				char *name = (char*)malloc(path - tag + 1);
-
-				memcpy(name, tag, path - tag);
-				name[path - tag] = 0;
-				beholddb_insert_tag(&list->head, name);
+				beholddb_insert_tag(&list->head, strrdup(tag, path));
 
 			} while (beholddb_tagchar == *path);
 
@@ -174,6 +193,18 @@ static int beholddb_get_name(const beholddb_path *bpath, char **pdb_name)
 	return BEHOLDDB_OK;
 }
 
+/*
+typedef struct beholddb_object
+{
+} beholddb_object;
+
+inline int beholddb_success(int rc)
+{
+  return SQLITE_OK == rc || SQLITE_DONE == rc || SQLITE_ROW == rc;
+}
+*/
+
+/*
 int beholddb_exec(sqlite3 *db, const char *sql)
 {
 	char *err;
@@ -181,6 +212,87 @@ int beholddb_exec(sqlite3 *db, const char *sql)
 	syslog(LOG_DEBUG, "beholddb_exec: sql=%s, rc=%d, err=%s", sql, rc, err ? err : "ok");
 	sqlite3_free(err);
 	return rc;
+}
+*/
+
+int beholddb_exec(sqlite3 *db, const char *sql)
+{
+  int rc;
+  sqlite3_stmt *stmt;
+
+  (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+  (rc = sqlite3_step(stmt));
+  sqlite3_finalize(stmt);
+  return rc;//SQLITE_DONE == rc ? BEHOLDDB_OK : BEHOLDDB_ERROR;
+}
+
+int beholddb_exec_bind_text(sqlite3 *db, const char *sql, const char *text)
+{
+  int rc;
+  sqlite3_stmt *stmt;
+
+  (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+  (rc = sqlite3_bind_text(stmt, 1, text, -1, SQLITE_STATIC)) ||
+  (rc = sqlite3_step(stmt));
+  sqlite3_finalize(stmt);
+  return rc;//SQLITE_DONE == rc ? BEHOLDDB_OK : BEHOLDDB_ERROR;
+}
+
+int beholddb_bind_text(sqlite3_stmt *stmt, const char *param, const char *value)
+{
+  int i = sqlite3_bind_parameter_index(stmt, param);
+  return sqlite3_bind_text(stmt, i, value, -1, SQLITE_STATIC);
+}
+
+int beholddb_bind_int(sqlite3_stmt *stmt, const char *param, int value)
+{
+  int i = sqlite3_bind_parameter_index(stmt, param);
+  return sqlite3_bind_int(stmt, i, value);
+}
+
+int beholddb_bind_int64(sqlite3_stmt *stmt, const char *param, sqlite3_int64 value)
+{
+  int i = sqlite3_bind_parameter_index(stmt, param);
+  return sqlite3_bind_int64(stmt, i, value);
+}
+
+int beholddb_bind_null(sqlite3_stmt *stmt, const char *param)
+{
+  int i = sqlite3_bind_parameter_index(stmt, param);
+  return sqlite3_bind_null(stmt, i);
+}
+
+int beholddb_begin(sqlite3 *db, const char *name)
+{
+  return name ?
+    beholddb_exec_bind_text(db, "savepoint ?", name) :
+    beholddb_exec(db, "begin");
+}
+
+int beholddb_end(sqlite3 *db, const char *name)
+{
+  return name ?
+    beholddb_exec_bind_text(db, "release ?", name) :
+    beholddb_exec(db, "end");
+}
+
+int beholddb_rollback(sqlite3 *db, const char *name)
+{
+  return name ?
+    beholddb_exec_bind_text(db, "rollback to ?", name) :
+    beholddb_exec(db, "rollback");
+}
+
+int beholddb_end_result(sqlite3 *db, const char *name, int rc)
+{
+  if (SQLITE_OK == rc || SQLITE_DONE == rc)
+  {
+    if (!beholddb_end(db, name))
+      return BEHOLDDB_OK;
+  }
+
+  beholddb_rollback(db, name);
+  return BEHOLDDB_ERROR;
 }
 
 static int beholddb_init(sqlite3 *db)
@@ -194,7 +306,47 @@ static int beholddb_init(sqlite3 *db)
 
 static int beholddb_create_tables(sqlite3 *db)
 {
-	return beholddb_exec(db,
+  int rc;
+  const char *sp = "tables";
+
+  (rc = beholddb_begin(db, sp)) ||
+  (rc = beholddb_exec(db,
+    "create table if not exists objects "
+    "( "
+    "id integer primary key, "
+    "id_parent integer references objects ( id ), "
+    "type integer, "
+    "name text, "
+    "unique ( id_parent, type, name ) "
+    ") ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_parent on objects ( id_parent ) ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_name on objects ( name ) ")) ||
+  (rc = beholddb_exec(db,
+    "create table if not exists objects_owners "
+    "( "
+    "id_owner integer references objects ( id ) on delete cascade, "
+    "id_object integer references objects ( id ) on delete cascade, "
+    "unique ( id_owner, id_object ) " // on conflict ignore ?
+    ") ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_owners_owner on objects_owners ( id_owner ) ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_owners_object on objects_owners ( id_object ) ")) ||
+  (rc = beholddb_exec(db,
+    "create table if not exists objects_tags "
+    "( "
+    "id_object integer references objects ( id ) on delete cascade, "
+    "id_tag integer references objects ( id ) on delete cascade, "
+    "unique ( id_object, id_tag ) " // on conflict ignore ?
+    ") ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_tags_object on objects_tags ( id_object ) ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_tags_tag on objects_tags ( id_tag ) "));
+  return beholddb_end_result(db, sp, rc);
+        /*
 		"create table if not exists files "
 		"("
 			"id integer primary key,"
@@ -225,7 +377,7 @@ static int beholddb_create_tables(sqlite3 *db)
 			"union "
 			"select ft.*, 0 type from files_tags ft "
 			"join files f on f.id = ft.id_file "
-			"where not f.type;");
+			"where not f.type;");*/
 }
 
 static int beholddb_open_read(const beholddb_path *bpath, sqlite3 **pdb)
@@ -292,6 +444,401 @@ static int beholddb_open_write(const beholddb_path *bpath, sqlite3 **pdb)
 	return rc;
 }
 
+typedef struct beholddb_tag_context
+{
+  int include;
+  int exclude;
+} beholddb_tag_context;
+
+typedef sqlite3_int64 beholddb_object;
+
+static void beholddb_tags_step(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+  beholddb_tag_list_set *tags = (beholddb_tag_list_set*)sqlite3_user_data(ctx);
+  beholddb_tag_context *tctx = (beholddb_tag_context*)
+    sqlite3_aggregate_context(ctx, sizeof(beholddb_tag_context));
+
+  if (!tctx->exclude)
+  {
+    const char *tag = sqlite3_value_text(*argv);
+
+    // TODO: optimize !!!
+    for (beholddb_tag_list_item *include = tags->include.head; include; include = include->next)
+      if (!strcmp(tag, include->name))
+      {
+        ++tctx->include; // TODO: works only with DISTINCT
+        return;
+      }
+    for (beholddb_tag_list_item *exclude = tags->exclude.head; exclude; exclude = exclude->next)
+      if (!strcmp(tag, exclude->name))
+      {
+        ++tctx->exclude; // TODO: works only with DISTINCT
+        return;
+      }
+  }
+}
+
+//static int beholddb_count_tags(beholddb_tag_list_item *head);
+
+static void beholddb_tags_final(sqlite3_context *ctx)
+{
+  beholddb_tag_list_set *links = (beholddb_tag_list_set*)sqlite3_user_data(ctx);
+  beholddb_tag_context *tctx = (beholddb_tag_context*)
+    sqlite3_aggregate_context(ctx, sizeof(beholddb_tag_context));
+
+  sqlite3_result_int(ctx, !tctx->exclude &&
+    tctx->include == beholddb_count_tags(links->include.head));
+}
+
+static void beholddb_include_exclude(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+  beholddb_tag_list *tags = (beholddb_tag_list*)sqlite3_user_data(ctx);
+  const char *tag = sqlite3_value_text(*argv);
+  int found = 0;
+
+  for (beholddb_tag_list_item *item = tags->head; item; item = item->next)
+    if (!strcmp(tag, item->name))
+    {
+      found = 1;
+      break;
+    }
+  sqlite3_result_int(ctx, found);
+}
+
+static int beholddb_register_tags(sqlite3 *db, const beholddb_tag_list_set *tags)
+{
+  return sqlite3_create_function_v2(db, "tags", 1, SQLITE_ANY, tags,
+    NULL, beholddb_tags_step, beholddb_tags_final, NULL);
+}
+
+static int beholddb_register_include(sqlite3 *db, const beholddb_tag_list_set *tags)
+{
+  return sqlite3_create_function_v2(db, "include", 1, SQLITE_ANY, tags->include,
+    beholddb_include_exclude, NULL, NULL, NULL);
+}
+
+static int beholddb_register_exclude(sqlite3 *db, const beholddb_tag_list_set *tags)
+{
+  return sqlite3_create_function_v2(db, "exclude", 1, SQLITE_ANY, tags->exclude,
+    beholddb_include_exclude, NULL, NULL, NULL);
+}
+
+static int beholddb_unregister_tags(sqlite3 *db)
+{
+  return sqlite3_create_function_v2(db, "tags", 1, SQLITE_ANY, NULL,
+    NULL, NULL, NULL, NULL);
+}
+
+static int beholddb_unregister_include(sqlite3 *db)
+{
+  return sqlite3_create_function_v2(db, "include", 1, SQLITE_ANY, NULL,
+    NULL, NULL, NULL, NULL);
+}
+
+static int beholddb_unregister_exclude(sqlite3 *db)
+{
+  return sqlite3_create_function_v2(db, "exclude", 1, SQLITE_ANY, NULL,
+    NULL, NULL, NULL, NULL);
+}
+
+// TODO: there should not be object type
+static int beholddb_create_object(sqlite3 *db, int type, char *name, beholddb_object id_parent, beholddb_object *pid)
+{
+  int rc;
+  sqlite3_stmt *stmt;
+  const char *sql, *sp = "create";
+
+  if (pid)
+    *pid = -1;
+  rc = beholddb_begin(db, sp);
+  if (!rc)
+  {
+    sql =
+      "insert into objects "
+      "( name, type, id_parent ) "
+      "values "
+      "( @name, @type, @id_parent )";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_text(stmt, "name", name)) ||
+    (rc = beholddb_bind_int(stmt, "type", type)) ||
+    (rc = -1 != id_parent ?
+      beholddb_bind_int64(stmt, "id_parent", id_parent) :
+      beholddb_bind_null(stmt, "id_parent")) ||
+    (rc = sqlite3_step(stmt));
+    sqlite3_finalize(stmt);
+  }
+  if (!rc)
+  {
+    if (pid)
+      *pid = sqlite3_last_insert_rowid(db);
+    rc = beholddb_exec(db,
+      "insert into objects_owners "
+      "( id_owner, id_object ) "
+      "values "
+      "( last_insert_rowid(), last_insert_rowid() )");
+  }
+  return beholddb_end_result(db, sp, rc);
+}
+
+// TODO: there should not be object type
+int beholddb_get_object(sqlite3 *db, int type, const beholddb_tag_list *path, const beholddb_tag_list_set *tags, beholddb_object *pid)
+{
+  int rc, tags = -1;
+  sqlite3_stmt *stmt;
+  char *sql, *mem;
+  //const char *sp = "get";
+
+  if (pid)
+    *pid = NULL;
+  //rc = beholddb_begin(db, sp);
+  //if (!rc)
+  {
+    rc = beholddb_register_tags(db, tags);
+  }
+  if (!rc)
+  {
+    // TODO: REMINDER: name=null is a special root object
+    sql = mem = sqlite3_mprintf(
+      "o.name is null and type = %d",
+      type);
+    for (beholddb_tag_list_item comp = path->head; comp; comp = comp->next)
+    {
+      sql = sqlite3_mprintf(
+        "o.id_parent = ( select o.id from objects o where %s ) and o.name = '%m'",
+        sql, comp.name);
+      sqlite3_free(mem);
+      mem = sql;
+    }
+    sql = sqlite3_mprintf(
+      "select o.id, tags(distinct t.name) "
+      "from objects o "
+      "join objects_owners oo on oo.id_owner = o.id "
+      "join objects_tags ot on ot.id_object = oo.id_object "
+      "join objects_owners tt on tt.id_object = ot.id_tag "
+      "join objects t on t.id = tt.id_owner "
+      "where %s "
+      "group by o.id ",
+      sql);
+    sqlite3_free(mem);
+
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = sqlite3_step(stmt));
+    if (SQLITE_ROW == rc)
+    {
+      if (pid)
+        *pid = sqilte3_column_int(stmt, 0);
+      tags = sqlite3_column_int(stmt, 1);
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_free(sql);
+  }
+  beholddb_unregister_tags(db);
+  //beholddb_end(db, sp);
+  switch (rc)
+  {
+  case SQLITE_DONE:
+    // no rows returned - object not found
+    return BEHOLDDB_NOTFOUND;
+  case SQLITE_ROW:
+    // row returned - object found, check tags
+    return tags ? BEHOLDDB_OK : BEHOLDDB_HIDDEN;
+  default:
+    return BEHOLDDB_ERROR;
+  }
+}
+
+static int beholddb_delete_object(sqlite3 *db, beholddb_object id)
+{
+  int rc;
+  sqlite3_stmt *stmt;
+  const char *sql, *sp = "delete";
+
+  rc = beholddb_begin(db, sp);
+  if (!rc)
+  {
+    sql =
+      "delete from objects "
+      "where id = @id";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int64(stmt, "id", id)) ||
+    (rc = sqlite3_step(stmt));
+    sqlite3_finalize(stmt);
+  }
+  return beholddb_end_result(db, sp, rc);
+}
+
+static int beholddb_set_object_parent(sqlite3 *db, beholddb_object id, beholddb_object id_parent)
+{
+  int rc;
+  sqlite3_stmt *stmt;
+  const char *sql, *sp = "parent";
+
+  rc = beholddb_begin(db, sp);
+  if (SQLITE_DONE == rc)
+  {
+    sql =
+      "delete from objects_owners "
+      "where id_owner in ( "
+      "select id_owner "
+      "from objects_owners "
+      "where id_object = "
+      "( select id_parent from objects where id = @id ) ) "
+      "and id_object in ( "
+      "select id_object "
+      "from objects_owners "
+      "where id_owner = "
+      "( select id from objects where id = @id ) ) ";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int64(stmt, "id", id)) ||
+    (rc = sqlite3_step(stmt));
+    sqlite3_finalize(stmt);
+  }
+  if (SQLITE_DONE == rc)
+  {
+    sql =
+      "insert into objects_owners "
+      "( id_owner, id_object ) "
+      "select own.id_owner, obj.id_object "
+      "from objects_owners own, objects_owners obj "
+      "where own.id_object = @id_parent "
+      "and obj.id_owner = @id ";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int64(stmt, "id", id)) ||
+    (rc = beholddb_bind_int64(stmt, "id_parent", id_parent)) ||
+    (rc = sqlite3_step(stmt));
+    sqlite3_finalize(stmt);
+  }
+  return beholddb_end_result(db, sp, rc);
+}
+
+// TODO: tags should be object ids, not names!
+static int beholddb_link_object(sqlite3 *db, beholddb_object id, int type, const beholddb_tag_list_set *tags)
+{
+  int rc, id;
+  sqlite3_stmt *stmt;
+  const char *sql, *sp = "link";
+
+  (rc = beholddb_begin(db, sp)) ||
+  (rc = beholddb_register_include(db, tags)) ||
+  (rc = beholddb_register_exclude(db, tags));
+  if (!rc)
+  {
+    sql =
+      "delete from objects_tags "
+      "where id = @id and "
+      "exclude(( select name from objects o where o.id = objects_tags.id_tag ))";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int64(stmt, "id", id)) ||
+    (rc = sqlite3_step(stmt));
+    sqlite3_finalize(stmt);
+  }
+  if (!rc)
+  {
+    sql =
+      "insert into objects_tags "
+      "( id_object, id_tag ) "
+      "select @id, id "
+      "from objects "
+      "where type = @type "
+      "and include(name) ";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int64(stmt, "id", id)) ||
+    (rc = sqlite3_step(stmt));
+    sqlite3_finalize(stmt);
+  }
+  beholddb_unregister_include(db);
+  beholddb_unregister_exclude(db);
+  return beholddb_end_result(db, sp, rc);
+}
+
+typedef struct beholddb_iterator
+{
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  const char *sp;
+} beholddb_iterator;
+
+int beholddb_open_object(sqlite3 *db, beholddb_object id, beholddb_tag_list_set *tags, beholddb_iterator **pit)
+{
+  int rc;
+  sqlite3_stmt *stmt;
+  const char *sql;
+  const char *sp = "list_path";
+
+  *pit = NULL;
+  rc = beholddb_begin(db, sp);
+  if (!rc)
+  {
+    rc = beholddb_register_tags(db, tags);
+  }
+  if (!rc)
+  {
+    // TODO: REMINDER: name=null is a special root object
+    sql =
+      "select o.name "
+      "from objects o "
+      "join objects_owners oo on oo.id_owner = o.id "
+      "join objects_tags ot on ot.id_object = oo.id_object "
+      "join objects_owners tt on tt.id_object = ot.id_tag "
+      "join objects t on t.id = tt.id_owner "
+      "where o.id_parent = @id "
+      "group by o.id "
+      "having tags(distinct t.name) ";
+
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int64(db, "id", id));
+    if (!rc)
+    {
+      *pit = (beholddb_iterator*)sqlite3_malloc(sizeof(beholddb_iterator));
+      (*pit)->db = db;
+      (*pit)->sp = sp;
+      (*pit)->stmt = stmt;
+    }
+  }
+  if (rc)
+  {
+    beholddb_unregister_tags(db);
+    beholddb_end(db, sp);
+    return BEHOLDDB_ERROR;
+  }
+  return BEHOLDDB_OK;
+}
+
+int beholddb_next_item(beholddb_iterator *it, const char **item)
+{
+  switch (sqlite3_step(it->stmt))
+  {
+  case SQLITE_ROW:
+    *item = sqlite3_column_text(it->stmt, 0);
+    return BEHOLDDB_OK;
+  case SQLITE_DONE:
+    *item = NULL;
+    return BEHOLDDB_DONE;
+  default:
+    *item = NULL;
+    return BEHOLDDB_ERROR;
+  }
+}
+
+int beholddb_close_iterator(beholddb_iterator *it)
+{
+  if (it)
+  {
+    sqlite3_finalize(it->stmt);
+    beholddb_unregister_tags(it->db);
+    beholddb_end(it->db, it->sp);
+    sqlite3_free(it);
+  }
+  return BEHOLDDB_OK;
+}
+
+/*
+int beholddb_set_object_time()
+{
+}
+*/
+
+/*
 static int beholddb_begin_transaction(sqlite3 *db)
 {
 	return beholddb_exec(db, "begin transaction;");
@@ -539,6 +1086,7 @@ static int beholddb_locate_file_worker(sqlite3 *db, const beholddb_path *bpath)
 	sqlite3_finalize(stmt);
 	return rc;
 }
+*/
 
 int beholddb_locate_file(const beholddb_path *bpath)
 {
@@ -561,7 +1109,7 @@ int beholddb_locate_file(const beholddb_path *bpath)
 	sqlite3 *db;
 
 	(rc = beholddb_open_read(bpath, &db)) ||
-	(rc = beholddb_locate_file_worker(db, bpath));
+	(rc = beholddb_get_object(db, 0, &bpath->path));
 
 	sqlite3_close(db);
 
@@ -586,6 +1134,7 @@ int beholddb_get_file(const char *path, beholddb_path **pbpath)
 	return rc;
 }
 
+/*
 static int beholddb_mark_object(const beholddb_path *bpath, const beholddb_tag_list_set *dirs_tags);
 
 static int beholddb_mark_recursive(sqlite3 *db, const beholddb_path *bpath)
@@ -808,12 +1357,14 @@ static int beholddb_create_file_with_tags(const beholddb_path *bpath,
 
 	return rc; // TODO: error handling
 }
+*/
 
 int beholddb_create_file(const beholddb_path *bpath, int type)
 {
 	return beholddb_create_file_with_tags(bpath, NULL, NULL, type);
 }
 
+/*
 static int beholddb_delete_file_with_tags(const beholddb_path *bpath,
 	beholddb_tag_list *files_tags, beholddb_tag_list *dirs_tags,
 	int *ptype)
@@ -880,12 +1431,14 @@ static int beholddb_delete_file_with_tags(const beholddb_path *bpath,
 	syslog(LOG_DEBUG, "beholddb_delete_file: result=%d", rc);
 	return rc; // TODO: error handling
 }
+*/
 
 int beholddb_delete_file(const beholddb_path *bpath)
 {
 	return beholddb_delete_file_with_tags(bpath, NULL, NULL, NULL);
 }
 
+/*
 int beholddb_rename_file(const beholddb_path *oldbpath, const beholddb_path *newbpath)
 {
 	int type;
@@ -1050,4 +1603,5 @@ int beholddb_closedir(void *handle)
 
 	return BEHOLDDB_OK;
 }
+*/
 
