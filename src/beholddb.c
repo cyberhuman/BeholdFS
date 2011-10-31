@@ -111,13 +111,13 @@ int beholddb_parse_path(const char *path, beholddb_path **pbpath)
 		default:
 			if (beholddb_tagchar != *path)
 			{
-				const char *comp = path;
+				const char *item = path;
 
 				*pathptr++ = '/';
 				bpath->basename = pathptr;
 				while (*path && '/' != *path)
 					*pathptr++ = *path++;
-				beholddb_insert_tag(&bpath->path, strrdup(comp, path));
+				beholddb_insert_tag(&bpath->path, strrdup(item, path));
 			} else
 			do
 			{
@@ -389,7 +389,7 @@ static int beholddb_create_tables(sqlite3 *db)
     "create table if not exists objects "
     "( "
     "id integer primary key, "
-    "id_parent integer references objects ( id ), "
+    "id_parent integer references objects ( id ) on delete restrict, "
     "type integer, "
     "name text, "
     "unique ( id_parent, type, name ) "
@@ -421,38 +421,6 @@ static int beholddb_create_tables(sqlite3 *db)
   (rc = beholddb_exec(db,
     "create index if not exists objects_tags_tag on objects_tags ( id_tag ) "));
   return beholddb_end_result(db, sp, rc);
-        /*
-		"create table if not exists files "
-		"("
-			"id integer primary key,"
-			"type integer not null,"
-			"name text unique on conflict ignore"
-		");"
-		"create table if not exists tags"
-		"("
-			"id integer primary key,"
-			"name text unique on conflict ignore"
-		");"
-		"create table if not exists files_tags"
-		"("
-			//"id integer primary key,"
-			"id_file integer not null references files(id) on delete cascade,"
-			"id_tag integer not null references tags(id),"// on delete cascade,"
-			"unique ( id_file, id_tag ) on conflict ignore"
-		");"
-		"create table if not exists dirs_tags"
-		"("
-			//"id integer primary key,"
-			"id_file integer not null references files(id) on delete cascade,"
-			"id_tag integer not null references tags(id),"// on delete cascade,"
-			"unique ( id_file, id_tag ) on conflict ignore"
-		");"
-		"create view if not exists strong_tags as "
-			"select dt.*, 1 type from dirs_tags dt "
-			"union "
-			"select ft.*, 0 type from files_tags ft "
-			"join files f on f.id = ft.id_file "
-			"where not f.type;");*/
 }
 
 static int beholddb_open_read(const beholddb_path *bpath, sqlite3 **pdb)
@@ -591,7 +559,36 @@ static int beholddb_create_object(sqlite3 *db, int type, char *name, beholddb_ob
 
 int beholddb_create_object_path(sqlite3 *db, int type, const beholddb_tag_list *path, beholddb_object *pid)
 {
-  ;
+  int rc;
+  beholddb_object id = -1;
+  sqlite3_stmt *stmt;
+  const char *sql, *sp = "create_path";
+
+  rc = beholddb_begin(db, sp);
+  if (!rc)
+  {
+    sql =
+      "select id "
+      "from objects "
+      "where name is null "
+      "and type = @type";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int(db, "type", type)) ||
+    (rc = sqlite3_step(stmt));
+    if (SQLITE_ROW == rc)
+    {
+      id = sqlite3_column_int(stmt, 0);
+      rc = SQLITE_OK;
+    }
+    sqlite3_finalize(stmt);
+  }
+  for (beholddb_tag_list_item *item = path->head; !rc && item; item = item->next)
+  {
+    rc = beholddb_create_object(db, type, item->name, id, *id);
+  }
+  if (pid)
+    *pid = id;
+  return beholddb_end_result(db, sp, rc);
 }
 
 // TODO: there should not be object type
@@ -610,11 +607,11 @@ int beholddb_get_object(sqlite3 *db, int type, const beholddb_tag_list *path, co
     sql = mem = sqlite3_mprintf(
       "o.name is null and type = %d",
       type);
-    for (beholddb_tag_list_item comp = path->head; comp; comp = comp->next)
+    for (beholddb_tag_list_item *item = path->head; item; item = item->next)
     {
       sql = sqlite3_mprintf(
         "o.id_parent = ( select o.id from objects o where %s ) and o.name = '%m'",
-        sql, comp.name);
+        sql, item.name);
       sqlite3_free(mem);
       mem = sql;
     }
@@ -733,12 +730,44 @@ static int beholddb_link_object(sqlite3 *db, beholddb_object id, int type, const
   {
     sql =
       "delete from objects_tags "
-      "where id = @id and "
-      "exclude(@tags, ( select name from objects o where o.id = objects_tags.id_tag ))";
+      "where id = @id "
+      "and exclude(@tags, (select name from objects o where o.id = objects_tags.id_tag)) ";
     (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
     (rc = beholddb_bind_int64(stmt, "id", id)) ||
     (rc = beholddb_bind_blob(db, "tags", tags, sizeof(beholddb_tag_list_set), SQLITE_STATIC)) ||
     (rc = sqlite3_step(stmt));
+    sqlite3_finalize(stmt);
+  }
+  if (!rc)
+  {
+    sql =
+      "delete from objects "
+      "where type = @type "
+      "and not exists(select 1 from objects_tags ot where ot.id_tag = objects.id) "
+      "and not include(objects.name)";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int(stmt, "type", type)) ||
+    (rc = sqlite3_step(stmt));
+    sqlite3_finalize(stmt);
+  }
+  if (!rc)
+  {
+    sql =
+      "insert into objects "
+      "( name, type, id_parent ) "
+      "values "
+      "( @name, @type, @id_parent ) ";
+    (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
+    (rc = beholddb_bind_int(stmt, "type", type)) ||
+    (rc = beholddb_bind_null(stmt, "id_parent"));
+    for (beholddb_tag_list_item *item = tags->include.head; !rc && item; item = item->next)
+    {
+      (rc = sqlite3_reset(stmt)) ||
+      (rc = beholddb_bind_text(stmt, "name", item->name)) ||
+      (rc = sqlite3_step(stmt));
+      if (SQLITE_CONSTRAINT == rc)
+        rc = SQLITE_OK;
+    }
     sqlite3_finalize(stmt);
   }
   if (!rc)
