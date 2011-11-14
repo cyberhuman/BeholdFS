@@ -268,6 +268,14 @@ int beholddb_bind_null(sqlite3_stmt *stmt, const char *param)
   return sqlite3_bind_null(stmt, i);
 }
 
+int beholddb_bind_int64_null(sqlite3_stmt *stmt, const char *param, sqlite3_int64 value)
+{
+  int i = sqlite3_bind_parameter_index(stmt, param);
+  return -1 == value ?
+    sqlite3_bind_null(stmt, i) :
+    sqlite3_bind_int64(stmt, i, value);
+}
+
 int beholddb_begin(sqlite3 *db, const char *name)
 {
   return name ?
@@ -355,6 +363,7 @@ static void beholddb_include_exclude(sqlite3_context *ctx, int argc, sqlite3_val
   const char *tag = sqlite3_value_text(argv[1]);
   int found = 0;
 
+  // TODO: optimize!!!
   for (beholddb_tag_list_item *item = list->head; item; item = item->next)
     if (!strcmp(tag, item->name))
     {
@@ -506,9 +515,7 @@ static int beholddb_create_object(sqlite3 *db, int type, char *name, beholddb_ob
     (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
     (rc = beholddb_bind_text(stmt, "name", name)) ||
     (rc = beholddb_bind_int(stmt, "type", type)) ||
-    (rc = -1 != id_parent ?
-      beholddb_bind_int64(stmt, "id_parent", id_parent) :
-      beholddb_bind_null(stmt, "id_parent")) ||
+    (rc = beholddb_bind_int64_null(stmt, "id_parent", id_parent)) ||
     (rc = sqlite3_step(stmt));
     sqlite3_finalize(stmt);
   }
@@ -525,9 +532,7 @@ static int beholddb_create_object(sqlite3 *db, int type, char *name, beholddb_ob
       "where id_object is @id_parent  ";
     (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
     (rc = beholddb_bind_int64(stmt, "id", id)) ||
-    (rc = -1 != id_parent ?
-      beholddb_bind_int64(stmt, "id_parent", id_parent) :
-      beholddb_bind_null(stmt, "id_parent")) ||
+    (rc = beholddb_bind_int64_null(stmt, "id_parent", id_parent)) ||
     (rc = sqlite3_step(stmt));
     sqlite3_finalize(stmt);
   } else
@@ -542,9 +547,7 @@ static int beholddb_create_object(sqlite3 *db, int type, char *name, beholddb_ob
     (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
     (rc = beholddb_bind_text(stmt, "name", name)) ||
     (rc = beholddb_bind_int(stmt, "type", type)) ||
-    (rc = -1 != id_parent ?
-      beholddb_bind_int64(stmt, "id_parent", id_parent) :
-      beholddb_bind_null(stmt, "id_parent")) ||
+    (rc = beholddb_bind_int64_null(stmt, "id_parent", id_parent)) ||
     (rc = sqlite3_step(stmt));
     if (SQLITE_ROW == rc)
     {
