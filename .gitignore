@@ -3,3 +3,5 @@
 beholdfs
 autom4te.cache
 *.so
+*.*~
+
