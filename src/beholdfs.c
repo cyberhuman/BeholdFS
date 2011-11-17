@@ -63,17 +63,30 @@ static int beholdfs_get_file(const char *path, beholddb_path **pbpath)
  */
 int beholdfs_getattr(const char *path, struct stat *stat)
 {
-	int ret = -ENOENT;
+	int rc, ret = -ENOENT;
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_getattr(path=%s)", path);
-	if (!(beholddb_parse_path(path, &bpath)))
+	if (!beholddb_parse_path(path, &bpath))
 	{
-		if ((ret = lstat(bpath->realpath, stat)))
-			ret = -errno; else
-		{
-			if (!S_ISDIR(stat->st_mode) && beholddb_locate_file(bpath))
-				ret = -ENOENT;
+		if ((lstat(bpath->realpath, stat)))
+    {
+			ret = -errno;
+    } else
+    {
+      rc = beholddb_locate_file(bpath);
+      switch (rc)
+      {
+      case BEHOLDDB_HIDDEN:
+        if (!S_ISDIR(stat->st_mode))
+        {
+          ret = -EACCES;
+          break;
+        }
+        // is a directory, fall through and succeed for hidden files
+      case BEHOLDDB_OK:
+        ret = 0;
+      }
 		}
 	}
 	syslog(LOG_DEBUG, "beholdfs_getattr: ret=%d", ret);
