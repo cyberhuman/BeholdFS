@@ -27,7 +27,7 @@
 #define BEHOLDDB_DONE       1
 #define BEHOLDDB_HIDDEN     2
 #define BEHOLDDB_ERROR     -1
-#define BEHOLDDB_NOTFOUND  -2
+#define BEHOLDDB_NOT_FOUND -2
 #define BEHOLDDB_EXISTS    -3
 //#define BEHOLDDB_FILTER  -100
 
