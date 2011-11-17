@@ -169,6 +169,7 @@ int beholddb_free_path(beholddb_path *bpath)
 
 	beholddb_free_tag_list(&bpath->include);
 	beholddb_free_tag_list(&bpath->exclude);
+  beholddb_free_tag_list(&bpath->path);
 
 	free((char*)bpath->realpath);
 	free(bpath);
