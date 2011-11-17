@@ -634,7 +634,7 @@ int beholddb_create_object_path(sqlite3 *db, int type, const beholddb_tag_list *
 }
 
 // TODO: there should not be object type
-int beholddb_locate_object_path(sqlite3 *db, int type, const beholddb_tag_list *path, const beholddb_tag_list_set *tags, beholddb_object *pid)
+static int beholddb_locate_object_path(sqlite3 *db, int type, const beholddb_tag_list *path, const beholddb_tag_list_set *tags, beholddb_object *pid)
 {
   int rc, visible = -1;
   beholddb_object id = -1;
@@ -1185,28 +1185,12 @@ int beholddb_locate_file(const beholddb_path *bpath)
 	sqlite3 *db;
 
 	(rc = beholddb_open_read(bpath, &db)) ||
-	(rc = beholddb_get_object(db, 0, &bpath->path));
+	(rc = beholddb_locate_object_path(db, 0, &bpath->path, &bpath->tags, NULL));
 
 	sqlite3_close(db);
 
-	if (rc)
+	if (rc < 0)
 		syslog(LOG_ERR, "beholddb_locate_file: error %d", rc);
-	return rc;
-}
-
-// find file by mixed path
-// return error if not found
-int beholddb_get_file(const char *path, beholddb_path **pbpath)
-{
-	syslog(LOG_DEBUG, "beholddb_get_file(path=%s)", path);
-
-	int rc;
-
-	(rc = beholddb_parse_path(path, pbpath)) ||
-	(rc = beholddb_locate_file(*pbpath));
-
-	if (rc)
-		syslog(LOG_ERR, "beholddb_get_file: error %d", rc);
 	return rc;
 }
 

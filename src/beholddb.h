@@ -64,7 +64,6 @@ typedef struct beholddb_path
 } beholddb_path;
 
 int beholddb_parse_path(const char *path, beholddb_path **pbpath);
-int beholddb_get_file(const char *path, beholddb_path **pbpath);
 int beholddb_locate_file(const beholddb_path *bpath);
 int beholddb_free_path(beholddb_path *bpath);
 

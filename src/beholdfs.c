@@ -39,6 +39,22 @@
 #include "beholdfs.h"
 #include "beholddb.h"
 
+// find file by mixed path
+// return error if not found
+static int beholdfs_get_file(const char *path, beholddb_path **pbpath)
+{
+	syslog(LOG_DEBUG, "beholdfs_get_file(path=%s)", path);
+
+	int rc;
+
+	(rc = beholddb_parse_path(path, pbpath)) ||
+	(rc = beholddb_locate_file(*pbpath));
+
+	if (rc)
+		syslog(LOG_ERR, "beholdfs_get_file: error %d", rc);
+	return rc;
+}
+
 /** Get file attributes.
  *
  * Similar to stat().  The 'st_dev' and 'st_blksize' fields are
@@ -79,7 +95,7 @@ int beholdfs_readlink(const char *path, char *buf, size_t bufsiz)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_readlink(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = readlink(bpath->realpath, buf, bufsiz)))
 			ret = -errno;
@@ -142,7 +158,7 @@ int beholdfs_unlink(const char *path)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_unlink(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = unlink(bpath->realpath)))
 			ret = -errno; else
@@ -160,7 +176,7 @@ int beholdfs_rmdir(const char *path)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_rmdir(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = rmdir(bpath->realpath)))
 			ret = -errno; else
@@ -180,7 +196,7 @@ int beholdfs_symlink(const char *oldpath, const char *newpath)
 
 	syslog(LOG_DEBUG, "beholdfs_symlink(oldpath=%s, newpath=%s)", oldpath, newpath);
 
-	int rc1 = beholddb_get_file(oldpath, &oldbpath);
+	int rc1 = beholdfs_get_file(oldpath, &oldbpath);
 	int rc2 = beholddb_parse_path(newpath, &newbpath);
 
 	if (!rc1 && !rc2)
@@ -206,7 +222,7 @@ int beholdfs_rename(const char *oldpath, const char *newpath)
 
 	syslog(LOG_DEBUG, "beholdfs_rename(oldpath=%s, newpath=%s)", oldpath, newpath);
 
-	int rc1 = beholddb_get_file(oldpath, &oldbpath);
+	int rc1 = beholdfs_get_file(oldpath, &oldbpath);
 	int rc2 = beholddb_parse_path(newpath, &newbpath);
 
 	if (!rc1 && !rc2)
@@ -236,7 +252,7 @@ int beholdfs_link(const char *oldpath, const char *newpath)
 
 	syslog(LOG_DEBUG, "beholdfs_link(oldpath=%s, newpath=%s)", oldpath, newpath);
 
-	int rc1 = beholddb_get_file(oldpath, &oldbpath);
+	int rc1 = beholdfs_get_file(oldpath, &oldbpath);
 	int rc2 = beholddb_parse_path(newpath, &newbpath);
 
 	if (!rc1 && !rc2)
@@ -260,7 +276,7 @@ int beholdfs_chmod(const char *path, mode_t mode)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_chmod(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = chmod(bpath->realpath, mode)))
 			ret = -errno;
@@ -277,7 +293,7 @@ int beholdfs_chown(const char *path, uid_t owner, gid_t group)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_chown(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = chown(bpath->realpath, owner, group)))
 			ret = -errno;
@@ -294,7 +310,7 @@ int beholdfs_truncate(const char *path, off_t length)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_truncate(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = truncate(bpath->realpath, length)))
 			ret = -errno;
@@ -326,7 +342,7 @@ int beholdfs_open(const char *path, struct fuse_file_info *fi)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_open(path=%s, flags=%2x)", path, fi->flags);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if (-1 == (fi->fh = open(bpath->realpath, fi->flags)))
 			ret = -errno; else
@@ -391,7 +407,7 @@ int beholdfs_statfs(const char *path, struct statvfs *statv)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_statfs(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = statvfs(bpath->realpath, statv)))
 			ret = -errno;
@@ -479,7 +495,7 @@ int beholdfs_setxattr(const char *path, const char *name, const char *value, siz
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_setxattr(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = lsetxattr(bpath->realpath, name, value, size, flags)))
 			ret = -errno;
@@ -496,7 +512,7 @@ int beholdfs_getxattr(const char *path, const char *name, char *value, size_t si
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_getxattr(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = lgetxattr(bpath->realpath, name, value, size)))
 			ret = -errno;
@@ -513,7 +529,7 @@ int beholdfs_listxattr(const char *path, char *list, size_t size)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_listxattr(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = llistxattr(bpath->realpath, list, size)))
 			ret = -errno;
@@ -530,7 +546,7 @@ int beholdfs_removexattr(const char *path, const char *name)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_removexattr(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = lremovexattr(bpath->realpath, name)))
 			ret = -errno;
@@ -558,7 +574,7 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 	void *handle;
 
 	syslog(LOG_DEBUG, "beholdfs_opendir(path=%s)", path);
-	if (!beholddb_get_file(path, &bpath)) // TODO: handle errors
+	if (!beholdfs_get_file(path, &bpath)) // TODO: handle errors
 	{
 		ret = 0;
 		if (!(dir = opendir(bpath->realpath)))
@@ -803,7 +819,7 @@ int beholdfs_access(const char *path, int mode)
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_access(path=%s)", path);
-	if (!beholddb_get_file(path, &bpath))
+	if (!beholdfs_get_file(path, &bpath))
 	{
 		if ((ret = access(bpath->realpath, mode)))
 			ret = -errno;
@@ -942,7 +958,7 @@ int beholdfs_utimens(const char *path, const struct timespec times[2])
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_utimens(path=%s)", path);
-	if (!(beholddb_get_file(path, &bpath)))
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = utimensat(AT_FDCWD, bpath->realpath, times, AT_SYMLINK_NOFOLLOW)))
 			ret = -errno;
