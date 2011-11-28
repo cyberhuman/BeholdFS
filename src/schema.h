@@ -25,6 +25,7 @@ extern const char *BEHOLDDB_DDL_FAST_LOCATE_START;
 extern const char *BEHOLDDB_DML_FAST_LOCATE;
 extern const char *BEHOLDDB_DDL_FAST_LOCATE_STOP;
 extern const char *BEHOLDDB_DML_TAG_LISTING;
+extern const char *BEHOLDDB_DML_FILE_TAG_LISTING;
 
 #endif // __SCHEMA_H__
 
