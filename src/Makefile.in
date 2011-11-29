@@ -90,7 +90,7 @@ INSTALL_SCRIPT = @INSTALL_SCRIPT@
 INSTALL_STRIP_PROGRAM = @INSTALL_STRIP_PROGRAM@
 LDFLAGS = @LDFLAGS@
 LIBOBJS = @LIBOBJS@
-LIBS = @LIBS@
+LIBS = `pkg-config fuse --libs` -lsqlite3
 LTLIBOBJS = @LTLIBOBJS@
 MAKEINFO = @MAKEINFO@
 MKDIR_P = @MKDIR_P@
@@ -150,7 +150,7 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 beholdfs_SOURCES = beholddb.c beholdfs.c common.c fs.c schema.c version.c
-beholdfs_CFLAGS = -g `pkg-config fuse --cflags --libs` -lsqlite3 -std=gnu99 -fms-extensions -DFUSE_USE_VERSION=26
+beholdfs_CFLAGS = -g -std=gnu99 -fms-extensions -DFUSE_USE_VERSION=26 `pkg-config fuse --cflags`
 all: all-am
 
 .SUFFIXES:
