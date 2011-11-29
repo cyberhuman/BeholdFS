@@ -980,7 +980,7 @@ int beholddb_opentags(const beholddb_path *bpath, void **phandle)
 		return BEHOLDDB_ERROR;
 	}
 
-	(rc = sqlite3_prepare_v2(db, BEHOLDDB_DML_TAG_LISTING, -1, &stmt, NULL)) ||
+	(rc = sqlite3_prepare_v2(db, BEHOLDDB_DML_FILE_TAG_LISTING, -1, &stmt, NULL)) ||
 	(rc = sqlite3_bind_text(stmt, 1, bpath->basename, -1, SQLITE_STATIC));
 
 	if (rc)
