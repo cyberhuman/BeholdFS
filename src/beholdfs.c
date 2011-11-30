@@ -63,15 +63,19 @@ static int beholdfs_get_file(const char *path, beholddb_path **pbpath)
  */
 int beholdfs_getattr(const char *path, struct stat *stat)
 {
-	int rc, ret = -ENOENT;
-	beholddb_path *bpath;
+  int rc, ret = -ENOENT;
+  beholddb_path *bpath;
 
-	syslog(LOG_DEBUG, "beholdfs_getattr(path=%s)", path);
-	if (!beholddb_parse_path(path, &bpath))
-	{
-		if ((lstat(bpath->realpath, stat)))
+  syslog(LOG_DEBUG, "beholdfs_getattr(path=%s)", path);
+  if (!beholddb_parse_path(path, &bpath))
+  {
+    if (bpath->listing)
     {
-			ret = -errno;
+      syslog(LOG_DEBUG, "beholdfs_getattr: listing was requested");
+    }
+    if (lstat(bpath->realpath, stat))
+    {
+      ret = -errno;
     } else
     {
       rc = beholddb_locate_file(bpath);
@@ -87,11 +91,11 @@ int beholdfs_getattr(const char *path, struct stat *stat)
       case BEHOLDDB_OK:
         ret = 0;
       }
-		}
-	}
-	syslog(LOG_DEBUG, "beholdfs_getattr: ret=%d", ret);
-	beholddb_free_path(bpath);
-	return ret;
+    }
+  }
+  syslog(LOG_DEBUG, "beholdfs_getattr: ret=%d", ret);
+  beholddb_free_path(bpath);
+  return ret;
 }
 
 /** Read the target of a symbolic link
@@ -507,8 +511,8 @@ int beholdfs_setxattr(const char *path, const char *name, const char *value, siz
 	int ret = -ENOENT;
 	beholddb_path *bpath;
 
-	syslog(LOG_DEBUG, "beholdfs_setxattr(path=%s)", path);
-	if (!(beholdfs_get_file(path, &bpath)))
+	syslog(LOG_DEBUG, "beholdfs_setxattr(path=%s,name=%s,value=%s,size=%d)", path, name, value, size);
+	if (!(beholddb_get_file(path, &bpath)))
 	{
 		if ((ret = lsetxattr(bpath->realpath, name, value, size, flags)))
 			ret = -errno;
@@ -518,17 +522,49 @@ int beholdfs_setxattr(const char *path, const char *name, const char *value, siz
 	return ret;
 }
 
+static const char BEHOLDFS_TAG_XATTR[] = "user.tags";
+
 /** Get extended attributes */
 int beholdfs_getxattr(const char *path, const char *name, char *value, size_t size)
 {
 	int ret = -ENOENT;
 	beholddb_path *bpath;
 
-	syslog(LOG_DEBUG, "beholdfs_getxattr(path=%s)", path);
-	if (!(beholdfs_get_file(path, &bpath)))
+	syslog(LOG_DEBUG, "beholdfs_getxattr(path=%s,name=%s,size=%d)", path, name, size);
+	if (!(beholddb_get_file(path, &bpath)))
 	{
-		if ((ret = lgetxattr(bpath->realpath, name, value, size)))
-			ret = -errno;
+		if (!strcmp(name, BEHOLDFS_TAG_XATTR))
+		{
+			void *handle;
+
+			if (beholddb_opentags(bpath, &handle))
+				ret = -ENOENT; else
+			{
+				ret = 0;
+				while (!beholddb_listdir(handle, &name))
+				{
+					size_t len = strlen(name);
+
+					ret += 1 + len;
+					if (size)
+					{
+						if (ret > size)
+						{
+							ret = -ERANGE;
+							break;
+						}
+						*value++ = BEHOLDFS_STATE->tagchar;
+						memcpy(value, name, len);
+						value += len;
+					}
+				}
+				beholddb_closedir(handle);
+			}
+		} else
+		{
+			if ((ret = lgetxattr(bpath->realpath, name, value, size)) < 0)
+				ret = -errno;
+		}
 	}
 	syslog(LOG_DEBUG, "beholdfs_getxattr: ret=%d", ret);
 	beholddb_free_path(bpath);
@@ -541,13 +577,26 @@ int beholdfs_listxattr(const char *path, char *list, size_t size)
 	int ret = -ENOENT;
 	beholddb_path *bpath;
 
-	syslog(LOG_DEBUG, "beholdfs_listxattr(path=%s)", path);
-	if (!(beholdfs_get_file(path, &bpath)))
+	syslog(LOG_DEBUG, "beholdfs_listxattr(path=%s,size=%d)", path, size);
+	if (!(beholddb_get_file(path, &bpath)))
 	{
-		if ((ret = llistxattr(bpath->realpath, list, size)))
-			ret = -errno;
+		if (size && size < sizeof(BEHOLDFS_TAG_XATTR))
+			ret = -ERANGE; else
+		{
+			if (size)
+			{
+				memcpy(list, BEHOLDFS_TAG_XATTR, sizeof(BEHOLDFS_TAG_XATTR));
+				list += sizeof(BEHOLDFS_TAG_XATTR);
+				size -= sizeof(BEHOLDFS_TAG_XATTR);
+			}
+			if ((ret = llistxattr(bpath->realpath, list, size)) < 0)
+				ret = -errno; else
+				ret += sizeof(BEHOLDFS_TAG_XATTR);
+		}
 	}
 	syslog(LOG_DEBUG, "beholdfs_listxattr: ret=%d", ret);
+	for (int i = 0; i < ret - sizeof(BEHOLDFS_TAG_XATTR); i += 1 + strlen(&list[i]))
+		syslog(LOG_DEBUG, "beholdfs_listxattr: list[]=%s", &list[i]);
 	beholddb_free_path(bpath);
 	return ret;
 }
@@ -583,36 +632,49 @@ int beholdfs_opendir(const char *path, struct fuse_file_info *fi)
 {
 	int ret = -ENOENT;
 	beholddb_path *bpath;
-	DIR *dir;
-	void *handle;
 
 	syslog(LOG_DEBUG, "beholdfs_opendir(path=%s)", path);
 	if (!beholdfs_get_file(path, &bpath)) // TODO: handle errors
 	{
+		DIR *dir = NULL;
+		void *handle = NULL;
+		struct dirent *entry = NULL;
+		int stage = 0;
+
 		ret = 0;
-		if (!(dir = opendir(bpath->realpath)))
-			ret = -errno; else
+		if (bpath->listing)
+		{
+			if (beholddb_opendir(bpath, &handle))
+				ret = -ENOENT;
+		} else
+		{
+			if (!(dir = opendir(bpath->realpath)))
+				ret = -errno; else
+			if (beholddb_opendir(bpath, &handle))
+				ret = -ENOENT; else
+			{
+				int len = offsetof(struct dirent, d_name) +
+					pathconf(bpath->realpath, _PC_NAME_MAX) + 1;
+
+				entry = (struct dirent*)malloc(len);
+				stage = BEHOLDFS_STATE->tagshow ? 2 : 1;
+			}
+		}
+		if (ret)
+		{
+			if (dir)
+				closedir(dir);
+		} else
 		{
 			beholdfs_dir *fsdir = (beholdfs_dir*)malloc(sizeof(beholdfs_dir));
-			int len = offsetof(struct dirent, d_name) +
-				pathconf(bpath->realpath, _PC_NAME_MAX) + 1;
 
-			beholddb_opendir(bpath, &handle);
 			fsdir->dir = dir;
 			fsdir->handle = handle;
-			if (bpath->listing)
-			{
-				fsdir->stage = 0;
-				fsdir->entry = NULL;
-			} else
-			{
-				fsdir->stage = BEHOLDFS_STATE->tagshow ? 2 : 1;
-				fsdir->entry = (struct dirent*)malloc(len);
-			}
+			fsdir->stage = stage;
+			fsdir->entry = entry;
+
 			fsdir->result = NULL;
 			fsdir->dbresult = NULL;
-
-			syslog(LOG_DEBUG, "beholdfs_opendir: handle=%p", handle);
 
 			fi->fh = (intptr_t)fsdir;
 		}
@@ -650,28 +712,25 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 
 	beholdfs_dir *fsdir = (beholdfs_dir*)(intptr_t)fi->fh;
 	struct stat stat;
-	int fd = dirfd(fsdir->dir);
 	int ret;
 
 	if (fsdir->stage)
 	{
 		if (2 == fsdir->stage) // show tag character
 		{
-			--fsdir->stage;
-
-			if (fstat(fd, &stat))
-			{
-				ret = -errno;
-				return ret;
-			}
-
 			const char LISTING_DIR[] = { BEHOLDFS_STATE->tagchar, 0 };
+
+			memset(&stat, 0, sizeof(stat));
+			stat.st_mode = S_IFDIR | S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+			stat.st_nlink = 1;
 
 			if (filler(buffer, LISTING_DIR, &stat, ++offset))
 			{
 				syslog(LOG_ERR, "beholdfs_readdir: could not add listing dir");
 				return 0; // buffer is full (should not happen)
 			}
+
+			--fsdir->stage;
 		}
 
 		// stage 1
@@ -688,6 +747,7 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 			}
 
 			char *name = fsdir->result->d_name;
+			int fd = dirfd(fsdir->dir);
 
 			ret = fstatat(fd, name, &stat, AT_SYMLINK_NOFOLLOW);
 			if (filler(buffer, name, ret ? NULL : &stat, ++offset))
@@ -705,14 +765,11 @@ int beholdfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off
 			syslog(LOG_ERR, "beholdfs_readdir: trying to list tags in directory without metadata");
 			return -ENOENT;
 		}
-
-		if (fstat(fd, &stat))
-		{
-			ret = -errno;
-			syslog(LOG_ERR, "beholdfs_readdir: tag listing: stat() error (%d)", ret);
-			return ret;
-		}
 		ret = 0;
+
+		memset(&stat, 0, sizeof(stat));
+		stat.st_mode = S_IFDIR | S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+		stat.st_nlink = 1;
 
 		// stage 0
 		while (1)
@@ -794,7 +851,11 @@ void *beholdfs_init(struct fuse_conn_info *conn)
 	beholddb_tagchar = state->tagchar;
 	beholddb_new_locate = state->new_locate;
 
-	fchdir(state->rootdir);
+	if (fchdir(state->rootdir))
+	{
+		syslog(LOG_ERR, "beholdfs_init(): cannot fchdir: %s", strerror(errno));
+		// TODO: how to handle this?
+	}
 	close(state->rootdir);
 
 	return state;
@@ -909,12 +970,12 @@ int beholdfs_ftruncate(const char *path, off_t length, struct fuse_file_info *fi
  *
  * Introduced in version 2.5
  */
-int beholdfs_fgetattr(const char *path, struct stat *buf, struct fuse_file_info *fi)
+int beholdfs_fgetattr(const char *path, struct stat *stat, struct fuse_file_info *fi)
 {
 	int ret;
 
 	syslog(LOG_DEBUG, "beholdfs_fgetattr(path=%s)", path);
-	if ((ret = fstat(fi->fh, buf)))
+	if ((ret = fstat(fi->fh, stat)))
 		ret = -errno;
 	syslog(LOG_DEBUG, "beholdfs_fgetattr: ret=%d", ret);
 	return ret;

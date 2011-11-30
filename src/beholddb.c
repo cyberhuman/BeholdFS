@@ -1576,6 +1576,42 @@ int beholddb_opendir(const beholddb_path *bpath, void **phandle)
 	return rc;
 }
 
+int beholddb_opentags(const beholddb_path *bpath, void **phandle)
+{
+	syslog(LOG_DEBUG, "beholddb_opentags(realpath=%s)", bpath->realpath);
+
+	*phandle = NULL;
+
+	int rc;
+	sqlite3 *db;
+	sqlite3_stmt *stmt;
+
+	rc = beholddb_open_read(bpath, &db);
+	if (rc)
+	{
+		syslog(LOG_ERR, "beholddb_opentags: error opening database (%d)", rc);
+		return BEHOLDDB_ERROR;
+	}
+
+	(rc = sqlite3_prepare_v2(db, BEHOLDDB_DML_FILE_TAG_LISTING, -1, &stmt, NULL)) ||
+	(rc = sqlite3_bind_text(stmt, 1, bpath->basename, -1, SQLITE_STATIC));
+
+	if (rc)
+		sqlite3_close(db); else
+	{
+		beholddb_dir *dir = (beholddb_dir*)malloc(sizeof(beholddb_dir));
+
+		dir->db = db;
+		dir->stmt = stmt;
+		*phandle = (void*)dir;
+	}
+
+	if (rc)
+		syslog(LOG_ERR, "beholddb_opentags: error %d", rc); else
+		syslog(LOG_DEBUG, "beholddb_opentags: ok, handle=%p", *phandle);
+	return rc;
+}
+
 static int beholddb_readdir_worker(sqlite3_stmt *stmt, const char *name)
 {
 	syslog(LOG_DEBUG, "beholddb_readdir(name=%s)", name);

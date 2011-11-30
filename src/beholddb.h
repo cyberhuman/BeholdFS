@@ -71,6 +71,7 @@ int beholddb_create_file(const beholddb_path *bpath, int type);
 int beholddb_delete_file(const beholddb_path *bpath);
 int beholddb_rename_file(const beholddb_path *oldbpath, const beholddb_path *newbpath);
 int beholddb_opendir(const beholddb_path *bpath, void **handle);
+int beholddb_opentags(const beholddb_path *bpath, void **handle);
 int beholddb_readdir(void *handle, const char *name);
 int beholddb_listdir(void *handle, const char **pname);
 int beholddb_closedir(void *handle);

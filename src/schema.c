@@ -97,6 +97,13 @@ const char *BEHOLDDB_DML_TAG_LISTING =
 	"group by tt.id "
 	"order by count(*) desc ";
 
+const char *BEHOLDDB_DML_FILE_TAG_LISTING =
+	"select t.name "
+	"from files f "
+	"join files_tags ft on ft.id_file = f.id "
+	"join tags t on t.id = ft.id_tag "
+	"where f.name = ?";
+
 const char *BEHOLDDB_DDL_CREATE_CONFIG =
 	"create table if not exists config "
 	"( "
