@@ -138,7 +138,7 @@ int beholdfs_mknod(const char *path, mode_t mode, dev_t dev)
 	{
 		if ((ret = mknod(bpath->realpath, mode, dev)))
 			ret = -errno; else
-			beholddb_create_file(bpath, 0);
+			beholddb_create_file(bpath);
 	}
 	syslog(LOG_DEBUG, "beholdfs_mknod: ret=%d", ret);
 	beholddb_free_path(bpath);
@@ -161,7 +161,7 @@ int beholdfs_mkdir(const char *path, mode_t mode)
 	{
 		if ((ret = mkdir(bpath->realpath, mode)))
 			ret = -errno; else
-			beholddb_create_file(bpath, 1);
+			beholddb_create_file(bpath);
 	}
 	syslog(LOG_DEBUG, "beholdfs_mkdir: ret=%d", ret);
 	beholddb_free_path(bpath);
@@ -220,7 +220,7 @@ int beholdfs_symlink(const char *oldpath, const char *newpath)
 	{
 		if (-1 == (ret = symlink(oldbpath->realpath, newbpath->realpath)))
 			ret = -errno; else
-			beholddb_create_file(newbpath, 0); // TODO: how to deal with symlinks to directories?
+			beholddb_create_file(newbpath); // TODO: how to deal with symlinks to directories?
 	}
 	syslog(LOG_DEBUG, "beholdfs_symlink: ret=%d", ret);
 	if (!rc1)
@@ -276,7 +276,7 @@ int beholdfs_link(const char *oldpath, const char *newpath)
 	{
 		if (-1 == (ret = link(oldbpath->realpath, newbpath->realpath)))
 			ret = -errno; else
-			beholddb_create_file(newbpath, 0);
+			beholddb_create_file(newbpath);
 	}
 	syslog(LOG_DEBUG, "beholdfs_link: ret=%d", ret);
 	if (!rc1)
@@ -511,8 +511,8 @@ int beholdfs_setxattr(const char *path, const char *name, const char *value, siz
 	int ret = -ENOENT;
 	beholddb_path *bpath;
 
-	syslog(LOG_DEBUG, "beholdfs_setxattr(path=%s,name=%s,value=%s,size=%d)", path, name, value, size);
-	if (!(beholddb_get_file(path, &bpath)))
+	syslog(LOG_DEBUG, "beholdfs_setxattr(path=%s,name=%s,value=%s,size=%lu)", path, name, value, size);
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if ((ret = lsetxattr(bpath->realpath, name, value, size, flags)))
 			ret = -errno;
@@ -530,8 +530,8 @@ int beholdfs_getxattr(const char *path, const char *name, char *value, size_t si
 	int ret = -ENOENT;
 	beholddb_path *bpath;
 
-	syslog(LOG_DEBUG, "beholdfs_getxattr(path=%s,name=%s,size=%d)", path, name, size);
-	if (!(beholddb_get_file(path, &bpath)))
+	syslog(LOG_DEBUG, "beholdfs_getxattr(path=%s,name=%s,size=%lu)", path, name, size);
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if (!strcmp(name, BEHOLDFS_TAG_XATTR))
 		{
@@ -577,8 +577,8 @@ int beholdfs_listxattr(const char *path, char *list, size_t size)
 	int ret = -ENOENT;
 	beholddb_path *bpath;
 
-	syslog(LOG_DEBUG, "beholdfs_listxattr(path=%s,size=%d)", path, size);
-	if (!(beholddb_get_file(path, &bpath)))
+	syslog(LOG_DEBUG, "beholdfs_listxattr(path=%s,size=%lu)", path, size);
+	if (!(beholdfs_get_file(path, &bpath)))
 	{
 		if (size && size < sizeof(BEHOLDFS_TAG_XATTR))
 			ret = -ERANGE; else
@@ -927,7 +927,7 @@ int beholdfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 			ret = -errno; else
 		{
 			ret = 0;
-			beholddb_create_file(bpath, 0);
+			beholddb_create_file(bpath);
 		}
 	}
 	syslog(LOG_DEBUG, "beholdfs_create: ret=%d", ret);
