@@ -19,8 +19,9 @@
 
 #include <sqlite3.h>
 
-#include "beholddb.h"
 #include "schema.h"
+#include "common.h"
+#include "version.h"
 
 const char *BEHOLDDB_DML_LOCATE =
 	"select 1 from ( select ? name ) fs "
@@ -112,11 +113,63 @@ const char *BEHOLDDB_DDL_CREATE_CONFIG =
 		"value text "
 	") ";
 
-int schema_version_init(sqlite3 *db)
+int schema_create(sqlite3 *db)
 {
-	int rc = BEHOLDDB_OK;
+  int rc;
+  static const char *sp = "tables";
 
-	beholddb_exec(db, BEHOLDDB_DDL_CREATE_CONFIG);
-	return rc;
+  (rc = beholddb_begin(db, sp)) ||
+
+  // create schema
+	(rc = beholddb_exec(db, BEHOLDDB_DDL_CREATE_CONFIG)) ||
+  (rc = beholddb_exec(db,
+    "create table if not exists objects "
+    "( "
+    "id integer primary key, "
+    "id_parent integer references objects ( id ) on delete restrict, "
+    "type integer, "
+    "name text, "
+    "unique ( id_parent, type, name ) "
+    ") ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_parent on objects ( id_parent ) ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_name on objects ( name ) ")) ||
+  (rc = beholddb_exec(db,
+    "create table if not exists objects_owners "
+    "( "
+    "id_owner integer references objects ( id ) on delete cascade, "
+    "id_object integer references objects ( id ) on delete cascade, "
+    "unique ( id_owner, id_object ) " // on conflict ignore ?
+    ") ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_owners_owner on objects_owners ( id_owner ) ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_owners_object on objects_owners ( id_object ) ")) ||
+  (rc = beholddb_exec(db,
+    "create table if not exists objects_tags "
+    "( "
+    "id_object integer references objects ( id ) on delete cascade, "
+    "id_tag integer references objects ( id ) on delete cascade, "
+    "unique ( id_object, id_tag ) " // on conflict ignore ?
+    ") ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_tags_object on objects_tags ( id_object ) ")) ||
+  (rc = beholddb_exec(db,
+    "create index if not exists objects_tags_tag on objects_tags ( id_tag ) ")) ||
+
+  // initialize filesystem root (TODO: move to beholddb.c)
+  (rc = beholddb_exec(db,
+    "insert into objects ( name, type ) values ( '/', 0 ) ")) ||
+  (rc = beholddb_exec(db,
+    "insert into objects_owners ( id_object, id_owner ) "
+    "select id, id from objects where name is '/' and type = 0")) ||
+
+  // set metadata version (TODO: move to version.c)
+  (rc = beholddb_set_fparam(db,
+    BEHOLDDB_VERSION_PARAM, BEHOLDDB_VERSION_FORMAT,
+    BEHOLDDB_VERSION_MAJOR, BEHOLDDB_VERSION_MINOR));
+
+  return beholddb_end(db, rc);
 }
 

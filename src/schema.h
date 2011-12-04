@@ -27,5 +27,7 @@ extern const char *BEHOLDDB_DDL_FAST_LOCATE_STOP;
 extern const char *BEHOLDDB_DML_TAG_LISTING;
 extern const char *BEHOLDDB_DML_FILE_TAG_LISTING;
 
+int schema_create(sqlite3 *db);
+
 #endif // __SCHEMA_H__
 

@@ -22,7 +22,12 @@
 
 #include <sqlite3.h>
 
-int beholddb_init_version(sqlite3 *db);
+#define BEHOLDDB_VERSION_MAJOR	1
+#define BEHOLDDB_VERSION_MINOR	0
+#define BEHOLDDB_VERSION_PARAM  "version"
+#define BEHOLDDB_VERSION_FORMAT "%d.%d"
+
+int version_init(sqlite3 *db);
 
 #endif // __VERSION_H__
 

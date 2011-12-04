@@ -27,10 +27,7 @@
 #include "common.h"
 #include "beholddb.h"
 
-#define BEHOLDDB_VERSION_MAJOR	1
-#define BEHOLDDB_VERSION_MINOR	0
-
-static int beholddb_decode_version(const char *version, int *pmajor, int *pminor)
+static int version_decode(const char *version, int *pmajor, int *pminor)
 {
 	if (!version)
 	{
@@ -38,7 +35,7 @@ static int beholddb_decode_version(const char *version, int *pmajor, int *pminor
 		*pminor = 0;
 		return BEHOLDDB_OK;
 	}
-	if (2 == sscanf(version, "%d.%d", pmajor, pminor))
+	if (2 == sscanf(version, BEHOLDDB_VERSION_FORMAT, pmajor, pminor))
 		return BEHOLDDB_OK;
 	return BEHOLDDB_ERROR;
 }
@@ -50,8 +47,8 @@ int version_init(sqlite3 *db)
 	const char *version;
 	int major, minor;
 
-	(rc = beholddb_get_param(db, "version", &version)) ||
-	(rc = beholddb_decode_version(version, &major, &minor));
+	(rc = beholddb_get_param(db, BEHOLDDB_VERSION_PARAM, &version)) ||
+	(rc = version_decode(version, &major, &minor));
 	free(version);
 
 	if (rc)
@@ -72,12 +69,12 @@ int version_init(sqlite3 *db)
 		syslog(LOG_NOTICE, "Metadata format is newer than the current");
 	} else
 	{
-		syslog(LOG_INFO, "Set version to %d.%d",
+		syslog(LOG_INFO, "Update version to " BEHOLDDB_VERSION_FORMAT,
 			BEHOLDDB_VERSION_MAJOR, BEHOLDDB_VERSION_MINOR);
-		beholddb_set_fparam(db, "version", "%d.%d",
+		beholddb_set_fparam(db,
+      BEHOLDDB_VERSION_PARAM, BEHOLDDB_VERSION_FORMAT,
 			BEHOLDDB_VERSION_MAJOR, BEHOLDDB_VERSION_MINOR);
 	}
-
 
 	switch (major)
 	{
@@ -92,5 +89,4 @@ int version_init(sqlite3 *db)
 
 	return BEHOLDDB_OK;
 }
-
 
