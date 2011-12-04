@@ -196,6 +196,7 @@ typedef struct beholddb_tag_context
 {
   int include;
   int exclude;
+  int total;
   beholddb_tag_list_set *tags;
 } beholddb_tag_context;
 
@@ -206,31 +207,29 @@ static void beholddb_tags_step(sqlite3_context *ctx, int argc, sqlite3_value **a
   beholddb_tag_list_set *tags = (beholddb_tag_list_set*)sqlite3_value_blob(argv[0]);
   beholddb_tag_context *tctx =
     (beholddb_tag_context*)sqlite3_aggregate_context(ctx, sizeof(beholddb_tag_context));
+  const char *tag = sqlite3_value_text(argv[1]);
 
-  syslog(LOG_DEBUG, "beholddb_tags_step(argc=%d, tags=%p, name=%s)", argc, tags, sqlite3_value_text(argv[1]));
+  syslog(LOG_DEBUG, "beholddb_tags_step(argc=%d, tags=%p, name=%s)", argc, tags, tag);
 
   tctx->tags = tags;
-  if (!tctx->exclude)
-  {
-    const char *tag = sqlite3_value_text(argv[1]);
 
-    if (!tag)
+  if (!tag)
+    return;
+
+  ++tctx->total;
+  // TODO: optimize !!!
+  for (beholddb_tag_list_item *include = tags->include.head; include; include = include->next)
+    if (!strcmp(tag, include->name))
+    {
+      ++tctx->include; // TODO: FIXME: ??? works only with DISTINCT, but DISTNICT can not be specified
       return;
-
-    // TODO: optimize !!!
-    for (beholddb_tag_list_item *include = tags->include.head; include; include = include->next)
-      if (!strcmp(tag, include->name))
-      {
-        ++tctx->include; // TODO: FIXME: works only with DISTINCT, but DISTNICT can not be specified
-        return;
-      }
-    for (beholddb_tag_list_item *exclude = tags->exclude.head; exclude; exclude = exclude->next)
-      if (!strcmp(tag, exclude->name))
-      {
-        ++tctx->exclude; // TODO: FIXME: works only with DISTINCT, but DISTNICT can not be specified
-        return;
-      }
-  }
+    }
+  for (beholddb_tag_list_item *exclude = tags->exclude.head; exclude; exclude = exclude->next)
+    if (!strcmp(tag, exclude->name))
+    {
+      ++tctx->exclude; // TODO: FIXME: ??? works only with DISTINCT, but DISTINCT can not be specified
+      return;
+    }
 }
 
 static void beholddb_tags_final(sqlite3_context *ctx)
@@ -238,13 +237,22 @@ static void beholddb_tags_final(sqlite3_context *ctx)
   beholddb_tag_context *tctx =
     (beholddb_tag_context*)sqlite3_aggregate_context(ctx, sizeof(beholddb_tag_context));
   beholddb_tag_list_set *tags = tctx->tags;
+  int include, exclude;
 
-  syslog(LOG_DEBUG, "beholddb_tags_final(tags=%p, include=%d, exclude=%d, tags.include=%d)",
-    tags, tctx->include, tctx->exclude,
-    tags ? beholddb_count_tags(tags->include.head) : -1);
+  if (tags)
+  {
+    include = beholddb_count_tags(tags->include.head);
+    exclude = beholddb_count_tags(tags->exclude.head);
+  } else
+    include = exclude = -1;
 
-  sqlite3_result_int(ctx, tags && !tctx->exclude &&
-    tctx->include == beholddb_count_tags(tags->include.head));
+  syslog(LOG_DEBUG, "beholddb_tags_final(tags=%p, include=%d, exclude=%d, total=%d, tags.include=%d, tags.exclude=%d)",
+    tags, tctx->include, tctx->exclude, tctx->total, include, exclude);
+
+
+  sqlite3_result_int(ctx, !tags ||
+    tctx->exclude != tctx->total &&
+    tctx->include == include);
 }
 
 static void beholddb_include_exclude(sqlite3_context *ctx, int argc, sqlite3_value **argv)
@@ -518,9 +526,9 @@ static int beholddb_locate_object_path(sqlite3 *db, int type, const beholddb_pat
       "select o.id, tags(@tags, t.name) "
       "from objects o "
       "join objects_owners oo on oo.id_owner = o.id "
-      "left join objects_tags ot on ot.id_object = oo.id_object "
-      "left join objects_owners tt on tt.id_object = ot.id_tag "
-      "left join objects t on t.id = tt.id_owner "
+      "join objects_tags ot on ot.id_object = oo.id_object "
+      "join objects_owners tt on tt.id_object = ot.id_tag "
+      "join objects t on t.id = tt.id_owner "
       "where %s "
       "group by o.id ",
       sql);
@@ -782,9 +790,9 @@ static int beholddb_open_object(sqlite3 *db, beholddb_object id, const beholddb_
       "select o.id, o.name "
       "from objects o "
       "join objects_owners oo on oo.id_owner = o.id "
-      "left join objects_tags ot on ot.id_object = oo.id_object "
-      "left join objects_owners tt on tt.id_object = ot.id_tag "
-      "left join objects t on t.id = tt.id_owner "
+      "join objects_tags ot on ot.id_object = oo.id_object "
+      "join objects_owners tt on tt.id_object = ot.id_tag "
+      "join objects t on t.id = tt.id_owner "
       "where o.id_parent = @id "
       "group by o.id "
       "having tags(@tags, t.name) ";
