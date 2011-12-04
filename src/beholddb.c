@@ -239,6 +239,10 @@ static void beholddb_tags_final(sqlite3_context *ctx)
     (beholddb_tag_context*)sqlite3_aggregate_context(ctx, sizeof(beholddb_tag_context));
   beholddb_tag_list_set *tags = tctx->tags;
 
+  syslog(LOG_DEBUG, "beholddb_tags_final(tags=%p, include=%d, exclude=%d, tags.include=%d)",
+    tags, tctx->include, tctx->exclude,
+    tags ? beholddb_count_tags(tags->include.head) : -1);
+
   sqlite3_result_int(ctx, tags && !tctx->exclude &&
     tctx->include == beholddb_count_tags(tags->include.head));
 }
@@ -914,12 +918,15 @@ static int beholddb_item_check(beholddb_iterator *it, const char *item)
     (rc = sqlite3_reset(it->stmt));
   }
 
+  if (rc)
+    syslog(LOG_DEBUG, "beholddb_item_check: %s, rc=%d", sqlite3_errmsg(it->db), rc);
+
   if (rc || (rc = beholddb_bind_text(it->stmt, "@name", item)))
     return BEHOLDDB_ERROR;
 
   rc = sqlite3_step(it->stmt);
 
-  syslog(LOG_DEBUG, "behloddb_item_check: item='%s', rc=%d", item, rc);
+  syslog(LOG_DEBUG, "beholddb_item_check: item='%s', rc=%d", item, rc);
 
   switch (rc)
   {
@@ -1055,7 +1062,8 @@ int beholddb_opendir(const beholddb_path *bpath, void **phandle)
     return rc;
 
   // FIXME: add listing support
-  (rc = beholddb_locate_object_path(db, BEHOLDDB_TYPE_FILE, bpath, &id)) ||
+  (rc = beholddb_locate_object_path(db, BEHOLDDB_TYPE_FILE, bpath, &id))
+    && BEHOLDDB_HIDDEN != rc ||
   (rc = beholddb_open_object(db, id, &bpath->tags, &it));
   if (rc)
   {
@@ -1115,6 +1123,7 @@ int beholddb_readdir(void *handle, const char *name)
   int rc;
   beholddb_dir *dir = (beholddb_dir*)handle;
 
+  syslog(LOG_DEBUG, "beholddb_readdir: dir=%p", dir);
   if (dir)
     rc = beholddb_item_check(dir->it, name); else
     rc = BEHOLDDB_OK; // FIXME: strcmp(name, BEHOLDDB_NAME) ? BEHOLDDB_OK : BEHOLDDB_ERROR;
