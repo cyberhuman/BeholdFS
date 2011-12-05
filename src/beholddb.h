@@ -21,7 +21,6 @@
 #define __BEHOLDDB_H__
 
 #include <sqlite3.h>
-//#define BEHOLDDB_PARSE_INVERT 1
 
 #define BEHOLDDB_OK         0
 #define BEHOLDDB_DONE       1
@@ -29,10 +28,10 @@
 #define BEHOLDDB_ERROR     -1
 #define BEHOLDDB_NOT_FOUND -2
 #define BEHOLDDB_EXISTS    -3
-//#define BEHOLDDB_FILTER  -100
 
-#define BEHOLDDB_TYPE_FILE  0
-#define BEHOLDDB_TYPE_TAG   1
+#define BEHOLDDB_TYPE_TAG        -1
+#define BEHOLDDB_TYPE_FILE        0
+#define BEHOLDDB_TYPE_DIRECTORY   1
 
 typedef struct beholddb_tag_list_item
 {
@@ -70,7 +69,7 @@ int beholddb_parse_path(const char *path, beholddb_path **pbpath);
 int beholddb_locate_file(const beholddb_path *bpath);
 int beholddb_free_path(beholddb_path *bpath);
 
-int beholddb_create_file(const beholddb_path *bpath);
+int beholddb_create_file(const beholddb_path *bpath, int type);
 int beholddb_delete_file(const beholddb_path *bpath);
 int beholddb_rename_file(const beholddb_path *oldbpath, const beholddb_path *newbpath);
 int beholddb_opendir(const beholddb_path *bpath, void **handle);

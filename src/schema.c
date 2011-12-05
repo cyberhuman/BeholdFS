@@ -160,10 +160,10 @@ int schema_create(sqlite3 *db)
 
   // initialize filesystem root (TODO: move to beholddb.c)
   (rc = beholddb_exec(db,
-    "insert into objects ( name, type ) values ( '/', 0 ) ")) ||
+    "insert into objects ( name, type ) values ( '/', 1 ) ")) ||
   (rc = beholddb_exec(db,
     "insert into objects_owners ( id_object, id_owner ) "
-    "select id, id from objects where name is '/' and type = 0")) ||
+    "select id, id from objects where name is '/' and type = 1")) ||
 
   // set metadata version (TODO: move to version.c)
   (rc = beholddb_set_fparam(db,

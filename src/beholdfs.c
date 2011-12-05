@@ -50,7 +50,7 @@ static int beholdfs_get_file(const char *path, beholddb_path **pbpath)
 	(rc = beholddb_parse_path(path, pbpath)) ||
 	(rc = beholddb_locate_file(*pbpath));
 
-	if (rc)
+	if (rc && BEHOLDDB_HIDDEN != rc)
 		syslog(LOG_ERR, "beholdfs_get_file: error %d", rc);
 	return rc;
 }
@@ -138,7 +138,7 @@ int beholdfs_mknod(const char *path, mode_t mode, dev_t dev)
 	{
 		if ((ret = mknod(bpath->realpath, mode, dev)))
 			ret = -errno; else
-			beholddb_create_file(bpath);
+			beholddb_create_file(bpath, BEHOLDDB_TYPE_FILE);
 	}
 	syslog(LOG_DEBUG, "beholdfs_mknod: ret=%d", ret);
 	beholddb_free_path(bpath);
@@ -161,7 +161,7 @@ int beholdfs_mkdir(const char *path, mode_t mode)
 	{
 		if ((ret = mkdir(bpath->realpath, mode)))
 			ret = -errno; else
-			beholddb_create_file(bpath);
+			beholddb_create_file(bpath, BEHOLDDB_TYPE_DIRECTORY);
 	}
 	syslog(LOG_DEBUG, "beholdfs_mkdir: ret=%d", ret);
 	beholddb_free_path(bpath);
@@ -220,7 +220,7 @@ int beholdfs_symlink(const char *oldpath, const char *newpath)
 	{
 		if (-1 == (ret = symlink(oldbpath->realpath, newbpath->realpath)))
 			ret = -errno; else
-			beholddb_create_file(newbpath); // TODO: how to deal with symlinks to directories?
+			beholddb_create_file(newbpath, BEHOLDDB_TYPE_FILE); // TODO: how to deal with symlinks to directories?
 	}
 	syslog(LOG_DEBUG, "beholdfs_symlink: ret=%d", ret);
 	if (!rc1)
@@ -276,7 +276,7 @@ int beholdfs_link(const char *oldpath, const char *newpath)
 	{
 		if (-1 == (ret = link(oldbpath->realpath, newbpath->realpath)))
 			ret = -errno; else
-			beholddb_create_file(newbpath);
+			beholddb_create_file(newbpath, BEHOLDDB_TYPE_FILE);
 	}
 	syslog(LOG_DEBUG, "beholdfs_link: ret=%d", ret);
 	if (!rc1)
@@ -889,11 +889,12 @@ void beholdfs_destroy(void *private_data)
  */
 int beholdfs_access(const char *path, int mode)
 {
-	int ret = -ENOENT;
+	int ret = -ENOENT, rc;
 	beholddb_path *bpath;
 
 	syslog(LOG_DEBUG, "beholdfs_access(path=%s)", path);
-	if (!beholdfs_get_file(path, &bpath))
+  rc = beholdfs_get_file(path, &bpath);
+	if (!rc || BEHOLDDB_HIDDEN == rc)
 	{
 		if ((ret = access(bpath->realpath, mode)))
 			ret = -errno;
@@ -927,7 +928,7 @@ int beholdfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 			ret = -errno; else
 		{
 			ret = 0;
-			beholddb_create_file(bpath);
+			beholddb_create_file(bpath, BEHOLDDB_TYPE_FILE);
 		}
 	}
 	syslog(LOG_DEBUG, "beholdfs_create: ret=%d", ret);
