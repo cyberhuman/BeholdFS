@@ -50,17 +50,23 @@ unmount()
   }
 }
 
-runtests()
+runtest()
 {
-  # TODO: replace this with a loop
-  test/0000.sh "$MOUNT" "$STORE"
+  local TEST="$1"
+
+  echo "===== Executing $TEST ====="
+
+  init && {
+    mount && {
+      "test/$TEST.sh" "$MOUNT" "$STORE"
+      unmount
+    }
+    cleanup
+  }
+  echo "----------------------------"
+  echo
 }
 
-init && {
-  mount && {
-    runtests
-    unmount
-  }
-  cleanup
-}
+runtest 0000
+runtest 0001
 
