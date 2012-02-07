@@ -229,8 +229,9 @@ int beholddb_free_path(beholddb_path *bpath)
 typedef struct beholddb_tag_context
 {
   beholddb_tag_list_item *notpresent;
-  int present;
-  int init;
+  int init: 1;
+  int isdir: 1;
+  int present: 1;
 } beholddb_tag_context;
 
 typedef sqlite3_int64 beholddb_object;
@@ -239,7 +240,8 @@ static void beholddb_tags_step(sqlite3_context *ctx, int argc, sqlite3_value **a
 {
   beholddb_tag_list_set *tags = (beholddb_tag_list_set*)sqlite3_value_blob(argv[0]);
   const char *tag = sqlite3_value_text(argv[1]);
-  const char *name = argc >= 3 ? sqlite3_value_text(argv[2]) : NULL;
+  const int type = sqlite3_value_int(argv[2]);
+  const char *name = argc >= 4 ? sqlite3_value_text(argv[3]) : NULL;
   beholddb_tag_context *tctx =
     (beholddb_tag_context*)sqlite3_aggregate_context(ctx, sizeof(beholddb_tag_context));
 
@@ -252,11 +254,10 @@ static void beholddb_tags_step(sqlite3_context *ctx, int argc, sqlite3_value **a
     tctx->init = 1;
   }
 
-  if (!tag)
-    return;
+  if (BEHOLDDB_TYPE_DIRECTORY == type)
+    tctx->isdir = 1;
 
-  // exit if at least one exclusive tag has been found already
-  if (tctx->present)
+  if (BEHOLDDB_TYPE_FILE != type || !tag)
     return;
 
   // TODO: optimize !!!
@@ -326,8 +327,8 @@ static int beholddb_init(sqlite3 *db)
   //sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_FKEY, 1, NULL);
   (rc = beholddb_exec(db, "pragma foreign_keys = on")) ||
   (rc = sqlite3_extended_result_codes(db, 1)) ||
-  (rc = sqlite3_create_function_v2(db, "tags", 2, SQLITE_ANY, NULL, NULL, beholddb_tags_step, beholddb_tags_final, NULL)) ||
   (rc = sqlite3_create_function_v2(db, "tags", 3, SQLITE_ANY, NULL, NULL, beholddb_tags_step, beholddb_tags_final, NULL)) ||
+  (rc = sqlite3_create_function_v2(db, "tags", 4, SQLITE_ANY, NULL, NULL, beholddb_tags_step, beholddb_tags_final, NULL)) ||
   (rc = sqlite3_create_function_v2(db, "include", 2, SQLITE_ANY, (void*)&BEHOLDDB_INCLUDE, beholddb_include_exclude, NULL, NULL, NULL)) ||
   (rc = sqlite3_create_function_v2(db, "exclude", 2, SQLITE_ANY, (void*)&BEHOLDDB_EXCLUDE, beholddb_include_exclude, NULL, NULL, NULL));
 
@@ -559,9 +560,10 @@ static int beholddb_locate_object_path(sqlite3 *db, const beholddb_path *bpath, 
       mem = sql;
     }
     sql = sqlite3_mprintf(
-      "select o.id, tags(@tags, t.name, o.name) "
+      "select o.id, tags(@tags, t.name, ooo.type, o.name) "
       "from objects o "
       "join objects_owners oo on oo.id_owner = o.id "
+      "join objects ooo on ooo.id = oo.id_object "
       "left join objects_tags ot on ot.id_object = oo.id_object "
       "left join objects_owners tt on tt.id_object = ot.id_tag "
       "left join objects t on t.id = tt.id_owner "
@@ -826,12 +828,13 @@ static int beholddb_open_object(sqlite3 *db, beholddb_object id, const beholddb_
       "select o.id, o.name "
       "from objects o "
       "join objects_owners oo on oo.id_owner = o.id "
+      "join objects ooo on ooo.id = oo.id_object "
       "left join objects_tags ot on ot.id_object = oo.id_object "
       "left join objects_owners tt on tt.id_object = ot.id_tag "
       "left join objects t on t.id = tt.id_owner "
       "where o.id_parent = @id "
       "group by o.id "
-      "having tags(@tags, t.name, o.name) ";
+      "having tags(@tags, t.name, ooo.type, o.name) ";
 
     (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
     (rc = beholddb_bind_int64(stmt, "@id", id)) ||
