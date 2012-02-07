@@ -67,6 +67,13 @@ runtest()
   echo
 }
 
-runtest 0000
-runtest 0001
+if [ -n "$1" ]; then
+  while [ -n "$1" ]; do
+    runtest "$1"
+    shift
+  done
+else
+  runtest 0000
+  runtest 0001
+fi
 
