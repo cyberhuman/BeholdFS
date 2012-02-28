@@ -228,10 +228,11 @@ int beholddb_free_path(beholddb_path *bpath)
 
 typedef struct beholddb_tag_context
 {
-  beholddb_tag_list_item *notpresent;
+  beholddb_tag_list_item *include_checklist;
   int init: 1;
   int isdir: 1;
-  int present: 1;
+  int found_exclude: 1;
+  int found_include: 1;
 } beholddb_tag_context;
 
 typedef sqlite3_int64 beholddb_object;
@@ -245,32 +246,32 @@ static void beholddb_tags_step(sqlite3_context *ctx, int argc, sqlite3_value **a
   beholddb_tag_context *tctx =
     (beholddb_tag_context*)sqlite3_aggregate_context(ctx, sizeof(beholddb_tag_context));
 
-  syslog(LOG_DEBUG, "beholddb_tags_step(argc=%d, tags=%p, tag=%s, name=%s)", argc, tags, tag, name);
+  syslog(LOG_DEBUG, "beholddb_tags_step(argc=%d, tags=%p, tag=%s, type=%d, name=%s)", argc, tags, tag, type, name);
 
   // initialize a copy of inclusive tags' list
   if (!tctx->init)
   {
-    tctx->notpresent = beholddb_shadow_tag_list(tags->include.head);
+    tctx->include_checklist = beholddb_shadow_tag_list(tags->include.head);
     tctx->init = 1;
+    tctx->isdir = BEHOLDDB_TYPE_DIRECTORY == type;
   }
 
-  if (BEHOLDDB_TYPE_DIRECTORY == type)
-    tctx->isdir = 1;
-
-  if (BEHOLDDB_TYPE_FILE != type || !tag)
+  if (!tag)
     return;
 
   // TODO: optimize !!!
-  for (beholddb_tag_list_item **pinclude = &tctx->notpresent; *pinclude; pinclude = &(*pinclude)->next)
+  for (beholddb_tag_list_item **pinclude = &tctx->include_checklist; *pinclude; pinclude = &(*pinclude)->next)
     if (!strcmp(tag, (*pinclude)->name))
     {
       beholddb_remove_tag(pinclude);
+      tctx->found_include = 1;
       break;
     }
   for (beholddb_tag_list_item *exclude = tags->exclude.head; exclude; exclude = exclude->next)
     if (!strcmp(tag, exclude->name))
     {
-      ++tctx->present;
+      // TODO: how to exclude directories?
+      tctx->found_exclude = 1;
       break;
     }
 }
@@ -279,24 +280,26 @@ static void beholddb_tags_final(sqlite3_context *ctx)
 {
   beholddb_tag_context *tctx =
     (beholddb_tag_context*)sqlite3_aggregate_context(ctx, sizeof(beholddb_tag_context));
-  int present, notpresent;
 
   if (tctx->init)
   {
-    present = tctx->present;
-    notpresent = !!tctx->notpresent;
-    beholddb_remove_tag_list(tctx->notpresent);
+    int exclude = tctx->found_exclude;
+    int include = tctx->isdir ? tctx->found_include : !tctx->include_checklist;
+    beholddb_remove_tag_list(tctx->include_checklist);
+
+    // positive result if:
+    // - no exclusive tags are present
+    // and
+    // - no inclusive tags are not present
+    sqlite3_result_int(ctx, include && !exclude);
+
+    syslog(LOG_DEBUG, "beholddb_tags_final(include=%d, exclude=%d)",
+      include, exclude);
   } else
-    present = notpresent = -1;
-
-  syslog(LOG_DEBUG, "beholddb_tags_final(present=%d, notpresent=%d)",
-    present, notpresent);
-
-  // positive result if:
-  // - no exclusive tags are present
-  // and
-  // - no inclusive tags are not present
-  sqlite3_result_int(ctx, !present && !notpresent);
+  {
+    sqlite3_result_null(ctx);
+    syslog(LOG_DEBUG, "beholddb_tags_final(null)");
+  }
 }
 
 static void beholddb_include_exclude(sqlite3_context *ctx, int argc, sqlite3_value **argv)
@@ -560,10 +563,10 @@ static int beholddb_locate_object_path(sqlite3 *db, const beholddb_path *bpath, 
       mem = sql;
     }
     sql = sqlite3_mprintf(
-      "select o.id, tags(@tags, t.name, ooo.type, o.name) "
+      "select o.id, tags(@tags, t.name, ob.type, o.name) "
       "from objects o "
       "join objects_owners oo on oo.id_owner = o.id "
-      "join objects ooo on ooo.id = oo.id_object "
+      "join objects ob on ob.id = oo.id_object "
       "left join objects_tags ot on ot.id_object = oo.id_object "
       "left join objects_owners tt on tt.id_object = ot.id_tag "
       "left join objects t on t.id = tt.id_owner "
@@ -825,16 +828,16 @@ static int beholddb_open_object(sqlite3 *db, beholddb_object id, const beholddb_
   {
     sql =
       "insert into fast_objects ( id, name ) "
-      "select o.id, o.name "
+      "select distinct o.id, o.name "
       "from objects o "
       "join objects_owners oo on oo.id_owner = o.id "
-      "join objects ooo on ooo.id = oo.id_object "
+      "join objects ob on ob.id = oo.id_object "
       "left join objects_tags ot on ot.id_object = oo.id_object "
       "left join objects_owners tt on tt.id_object = ot.id_tag "
       "left join objects t on t.id = tt.id_owner "
       "where o.id_parent = @id "
-      "group by o.id "
-      "having tags(@tags, t.name, ooo.type, o.name) ";
+      "group by oo.id_object "
+      "having tags(@tags, t.name, ob.type) ";
 
     (rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL)) ||
     (rc = beholddb_bind_int64(stmt, "@id", id)) ||

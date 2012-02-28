@@ -18,18 +18,31 @@ touch "$MOUNT/dir2/%tag2/file3"
 touch "$MOUNT/%tag3/dir2/file4"
 
 ls "$MOUNT"
+# dir0 dir1 dir2 file0 file1
 ls "$MOUNT/%tag1"
+# file1
 ls "$MOUNT/%tag2"
+# dir1 dir2
 ls "$MOUNT/%tag1%tag2"
+#
 ls "$MOUNT/%tag2%tag1"
+#
 ls "$MOUNT/%-tag1"
+# dir1 dir2 file0
 ls "$MOUNT/%-tag2"
+# dir2 file0 file1
 ls "$MOUNT/%-tag1%-tag2"
+# dir2 file0
 ls "$MOUNT/%-tag2%-tag1"
+# dir2 file0
 ls "$MOUNT/%tag1%-tag2"
+# file1
 ls "$MOUNT/%-tag1%tag2"
+# dir1 dir2
 ls "$MOUNT/%tag2%-tag1"
+# dir1 dir2
 ls "$MOUNT/%-tag2%tag1"
+# file1
 
 ls "$MOUNT/%tagX"
 ls "$MOUNT/%tag1%-tagX"

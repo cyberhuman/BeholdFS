@@ -1,0 +1,30 @@
+select distinct o.id, o.name 
+from objects o 
+join objects_owners oo on oo.id_owner = o.id 
+join objects ob on ob.id = oo.id_object 
+left join objects_tags ot on ot.id_object = oo.id_object 
+left join objects_owners to on to.id_object = ot.id_tag 
+left join objects tt on tt.id = to.id_owner 
+where o.id_parent = @ID_PARENT 
+group by oo.id_object 
+having TAG_FUN(@BLOB_TAGS, tt.name, ob.type) 
+
+/file0		NULL	.
+/file1		%tag1	%tag1
+/file2		%tag2	%tag2
+/file12		%tag1	%tag1%tag2
+/file12		%tag2	--""--
+/file23		%tag2	%tag2%tag3
+/file23		%tag3	--""--
+/dir1		NULL	.
+/dir1/d1file0	NULL	.
+/dir1/d1file13	%tag1	%tag1%tag3
+/dir1/d1file13	%tag3	--""--
+/dir1/d1file2	%tag2	%tag2
+/dir1/d1file4	%tag4	%tag4
+/dir2		NULL	.
+/dir3		NULL	.
+/dir3/d3file0	NULL	.
+/dir4/d4file1	%tag1	%tag1
+/dir4/d4file2	%tag2	%tag2
+

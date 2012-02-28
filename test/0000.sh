@@ -54,6 +54,7 @@ set +x
 echo "++simple check..."
 dbdump
 
+sleep 5s
 echo "++tags..."
 
 set -x
