@@ -1,7 +1,13 @@
 .*.swp
 .*.swo
-beholdfs
-autom4te.cache
 *.so
 *.*~
-
+*.o
+beholdfs
+autom4te.cache
+Makefile
+stamp-h1
+config.h
+config.log
+config.status
+.deps
